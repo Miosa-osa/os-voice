@@ -1,0 +1,35 @@
+{
+  "name": "@voquill/functions",
+  "version": "0.3.25",
+  "description": "Shared callable function helpers for Voquill apps.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/voquill/voquill.git",
+    "directory": "packages/functions"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@voquill/types": "workspace:*",
+    "zod": "^3.25.76"
+  },
+  "peerDependencies": {
+    "firebase": "^11.1.0"
+  },
+  "devDependencies": {
+    "@voquill/typescript-config": "workspace:*",
+    "firebase": "^11.10.0",
+    "typescript": "5.9.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

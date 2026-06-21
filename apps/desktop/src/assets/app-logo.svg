@@ -1,0 +1,7 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- OSA Logo - Circle with S-curve (yin-yang style) - uses currentColor for theming -->
+  <!-- Outer ring -->
+  <circle cx="64" cy="64" r="54" stroke="currentColor" stroke-width="10" fill="none"/>
+  <!-- S-curve shape -->
+  <path d="M64 10 Q20 40 40 64 Q60 88 64 118 Q108 88 88 64 Q68 40 64 10 Z" fill="currentColor"/>
+</svg>

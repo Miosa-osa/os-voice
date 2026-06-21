@@ -1,0 +1,38 @@
+{
+  "name": "voquill",
+  "private": true,
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "check-types": "turbo run check-types",
+    "test": "turbo run test",
+    "gen:bindings": "pnpm --filter @voquill/desktop-native-apis gen:bindings"
+  },
+  "devDependencies": {
+    "prettier": "^3.8.1",
+    "turbo": "^2.9.4",
+    "typescript": "6.0.2"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "packageManager": "pnpm@10.11.0",
+  "pnpm": {
+    "overrides": {
+      "@types/react": "19.2.10",
+      "yaml": ">=2.8.3",
+      "serialize-javascript": ">=7.0.5"
+    },
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp",
+      "bcrypt",
+      "protobufjs",
+      "chromedriver",
+      "@firebase/util",
+      "re2"
+    ]
+  }
+}

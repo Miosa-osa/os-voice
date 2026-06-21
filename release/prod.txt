@@ -1,0 +1,2 @@
+- Add support for simulated typing as a paste option for all platforms
+- Various bug fixes and improvements
