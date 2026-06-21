@@ -105,7 +105,7 @@ const SIDECAR_REQUEST_RETRY_DELAY_MS = 250;
 const MODEL_DOWNLOAD_TIMEOUT_MS = 45 * 60 * 1_000;
 const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 500;
 const SIDECAR_UPLOAD_CHUNK_SAMPLE_COUNT = 16_000;
-const SIDECAR_IDLE_DISPOSE_MS = 60_000;
+const SIDECAR_IDLE_DISPOSE_MS = 30 * 60 * 1_000;
 
 export class SidecarRequestError extends Error {
   status?: number;
