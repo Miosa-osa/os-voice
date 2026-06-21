@@ -1,5 +1,5 @@
 import { CheckBox, CheckBoxOutlineBlank } from "@mui/icons-material";
-import { Box, Stack, Tooltip, Typography } from "@mui/material";
+import { Box, Card, Stack, Tooltip, Typography } from "@mui/material";
 import { FormattedMessage } from "react-intl";
 import { isDefined } from "@voquill/utilities";
 
@@ -50,7 +50,7 @@ export const Section = ({
             {description}
           </Typography>
         )}
-        <Box sx={{ mt: 2 }}>{children}</Box>
+        <Card sx={{ mt: 2, p: 1 }}>{children}</Card>
       </Box>
     </Stack>
   );
