@@ -1,5 +1,14 @@
 import { createTheme, type Shadows } from "@mui/material/styles";
 
+// Soft, layered elevation scale (replaces the old all-flat shadows) for real depth + polish.
+const ELEVATION: Shadows = [
+  "none",
+  ...Array.from({ length: 24 }, (_, idx) => {
+    const i = idx + 1;
+    return `0px ${Math.round(i * 0.6)}px ${Math.round(i * 1.4 + 1)}px rgba(0,0,0,0.06), 0px ${Math.round(i * 1.4)}px ${Math.round(i * 2.4 + 2)}px rgba(0,0,0,0.10)`;
+  }),
+] as Shadows;
+
 export const theme = createTheme({
   cssVariables: {
     cssVarPrefix: "app",
@@ -48,10 +57,11 @@ export const theme = createTheme({
 
   shape: { borderRadius: 12 },
 
-  shadows: Array(25).fill("none") as unknown[] as Shadows,
+  shadows: ELEVATION,
 
   typography: {
-    fontFamily: '"Roboto","Helvetica","Arial",sans-serif',
+    fontFamily:
+      '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", system-ui, sans-serif',
     pxToRem: (px: number) => `${px / 16}rem`,
 
     displayLarge: { fontSize: 57, lineHeight: 1, fontWeight: 400 },
@@ -93,6 +103,9 @@ export const theme = createTheme({
       styleOverrides: {
         paper: ({ theme }) => ({
           backgroundColor: theme.vars.palette.level0,
+          borderRadius: 18,
+          boxShadow: theme.shadows[8],
+          backgroundImage: "none",
         }),
       },
     },
@@ -313,6 +326,9 @@ export const theme = createTheme({
           props: { variant: "flat" },
           style: ({ theme }) => ({
             backgroundColor: theme.vars.palette.level1,
+            border: `1px solid ${theme.vars.palette.level2}`,
+            borderRadius: 15,
+            boxShadow: theme.shadows[1],
           }),
         },
       ],
