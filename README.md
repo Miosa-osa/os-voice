@@ -81,6 +81,28 @@ Teach OS Voice your world so it's always right:
 
 ---
 
+## 🎚️ Recommended models
+
+**Transcription (Whisper)** — set in Settings → Transcription:
+
+| Model | Best for |
+|---|---|
+| `large-v3-turbo` (**Turbo**) | **GPU** — top accuracy, many× faster than real time |
+| `small` | **CPU** — great balance of speed + accuracy |
+| `base` / `tiny` | low-end hardware / maximum speed |
+
+**AI cleanup (Ollama)** — set in Settings → AI Post-Processing. Pick by your hardware:
+
+| Model | Notes |
+|---|---|
+| `gemma4:12b` | **Recommended** — best topic-paragraph structure, faithful to your words (~1s on a strong GPU) |
+| `qwen2.5:14b` | Solid all-rounder — faithful, good structure |
+| `qwen3.5:9b` | Fastest faithful option; lighter on paragraph structure |
+| `granite4.1:8b` | Faithful, instruction-tuned (IBM) |
+| `llama3.2:3b` | Tiny + near-instant (~0.3s) — great for modest hardware |
+
+All run **locally** via Ollama. Heavier models give better structure at the cost of more VRAM/latency; smaller ones are instant. The cleanup is **faithful by design** — it reformats your words and never invents content. Requires a recent Ollama (`ollama --version` ≥ 0.30) to pull the newest models.
+
 ## 🚀 Build & run (Linux)
 
 Requires **Node 18+**, **Rust**, and the system deps in `apps/desktop/scripts/setup-linux.sh` (plus `glslc` for the GPU build, and `ydotool`/`wtype` for Wayland typing).
@@ -92,7 +114,7 @@ pnpm run prepare:sidecars          # builds the Whisper engine + native pill
 pnpm exec tauri build --bundles deb
 ```
 
-For local **AI cleanup**, install [Ollama](https://ollama.com) and pull a model, e.g. `ollama pull qwen2.5:14b`, then enable it in **Settings → AI Post-Processing**.
+For local **AI cleanup**, install [Ollama](https://ollama.com) and pull a model (e.g. `ollama pull gemma4:12b` — see **Recommended models** above), then enable it in **Settings → AI Post-Processing**.
 
 See `CLAUDE.md` and `apps/desktop/scripts/setup-linux.sh` for full platform details.
 
