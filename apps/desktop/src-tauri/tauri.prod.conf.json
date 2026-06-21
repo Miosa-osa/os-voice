@@ -1,7 +1,7 @@
 {
   "productName": "OS Voice",
   "identifier": "com.osvoice.desktop",
-  "mainBinaryName": "Voquill",
+  "mainBinaryName": "OSVoice",
   "bundle": {
     "linux": {
       "deb": {

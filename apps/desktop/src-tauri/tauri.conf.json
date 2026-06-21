@@ -52,7 +52,7 @@
     "macOS": {
       "hardenedRuntime": true,
       "minimumSystemVersion": "13.3",
-      "entitlements": "macos/Voquill.entitlements"
+      "entitlements": "macos/OSVoice.entitlements"
     },
     "windows": {
       "webviewInstallMode": {
