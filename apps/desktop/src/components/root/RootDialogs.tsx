@@ -1,4 +1,3 @@
-import { MobileAppDialog } from "../dashboard/MobileAppDialog";
 import { NativeSetupDialog } from "./NativeSetupDialog";
 import { PaymentDialog } from "../payment/PaymentDialog";
 import { UpgradePlanDialog } from "../pricing/UpgradePlanDialog";
@@ -42,7 +41,6 @@ export const RootDialogs = () => {
       <DictationLanguageDialog />
       <AppKeybindingsDialog />
       <DiagnosticsDialog />
-      <MobileAppDialog />
       <NativeSetupDialog />
     </>
   );
