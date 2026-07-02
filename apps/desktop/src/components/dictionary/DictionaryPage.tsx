@@ -1,16 +1,13 @@
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import { Button } from "@mui/material";
-import { Term } from "@voquill/types";
-import dayjs from "dayjs";
 import { useCallback, useState } from "react";
 import { FormattedMessage } from "react-intl";
-import { showErrorSnackbar } from "../../actions/app.actions";
-import { loadDictionary } from "../../actions/dictionary.actions";
-import { setLocalStorageValue } from "../../actions/local-storage.actions";
+import {
+  createDictionaryTerm,
+  loadDictionary,
+} from "../../actions/dictionary.actions";
 import { useAsyncEffect } from "../../hooks/async.hooks";
-import { getTermRepo } from "../../repos";
-import { produceAppState, useAppStore } from "../../store";
-import { createId } from "../../utils/id.utils";
+import { useAppStore } from "../../store";
 import { ScrollListPage } from "../common/ScrollListPage";
 import { AddTermDialog } from "./AddTermDialog";
 import { DictionaryRow } from "./DictionaryRow";
@@ -23,58 +20,17 @@ export default function DictionaryPage() {
     await loadDictionary();
   }, []);
 
-  const addTerm = useCallback(
-    async (
-      sourceValue: string,
-      destinationValue: string,
-      replacement: boolean,
-    ) => {
-      const newTerm: Term = {
-        id: createId(),
-        createdAt: dayjs().toISOString(),
-        sourceValue,
-        destinationValue,
-        isReplacement: replacement,
-      };
-
-      produceAppState((draft) => {
-        draft.termById[newTerm.id] = newTerm;
-        draft.dictionary.termIds = [newTerm.id, ...draft.dictionary.termIds];
-      });
-
-      try {
-        const created = await getTermRepo().createTerm(newTerm);
-        produceAppState((draft) => {
-          draft.termById[created.id] = created;
-        });
-        setLocalStorageValue("voquill:checklist-dictionary", true);
-      } catch (error) {
-        produceAppState((draft) => {
-          delete draft.termById[newTerm.id];
-          draft.dictionary.termIds = draft.dictionary.termIds.filter(
-            (termId) => termId !== newTerm.id,
-          );
-        });
-        showErrorSnackbar(error);
-      }
-    },
-    [],
-  );
-
-  const handleAddGlossaryTerms = useCallback(
-    async (terms: string[]) => {
-      for (const term of terms) {
-        await addTerm(term, "", false);
-      }
-    },
-    [addTerm],
-  );
+  const handleAddGlossaryTerms = useCallback(async (terms: string[]) => {
+    for (const term of terms) {
+      await createDictionaryTerm(term, "", false);
+    }
+  }, []);
 
   const handleAddReplacement = useCallback(
     async (source: string, destination: string) => {
-      await addTerm(source, destination, true);
+      await createDictionaryTerm(source, destination, true);
     },
-    [addTerm],
+    [],
   );
 
   return (

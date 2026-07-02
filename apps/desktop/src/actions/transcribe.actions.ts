@@ -19,6 +19,10 @@ import {
   extractJsonFromMarkdown,
   unwrapNestedLlmResponse,
 } from "../utils/ai.utils";
+import {
+  detectDictionarySuggestions,
+  filterNewDictionarySuggestions,
+} from "../utils/dictionary-suggestion.utils";
 import { createId } from "../utils/id.utils";
 import {
   coerceToDictationLanguage,
@@ -41,6 +45,7 @@ import {
   loadMyEffectiveDictationLanguage,
 } from "../utils/user.utils";
 import { showErrorSnackbar } from "./app.actions";
+import { suggestDictionaryTerm } from "./dictionary.actions";
 import { addWordsToCurrentUser } from "./user.actions";
 
 export type TranscribeAudioInput = {
@@ -452,6 +457,16 @@ export const storeTranscription = async (
       ...existingIds,
     ];
   });
+
+  if (!getAppState().dictionary.suggestedTerm) {
+    const candidates = filterNewDictionarySuggestions(
+      detectDictionarySuggestions(storedTranscription.transcript),
+      Object.values(getAppState().termById),
+    );
+    if (candidates.length > 0) {
+      suggestDictionaryTerm(candidates[0]);
+    }
+  }
 
   if (wordsAdded > 0) {
     try {
