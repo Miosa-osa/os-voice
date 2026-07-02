@@ -21,6 +21,7 @@ import React, { useMemo } from "react";
 import ReactDOM from "react-dom/client";
 import { IntlProvider } from "react-intl";
 import { AppWithLoading } from "./components/root/AppWithLoading";
+import { DictionarySuggestionSnackbar } from "./components/root/DictionarySuggestionSnackbar";
 import { SnackbarEmitter } from "./components/root/SnackbarEmitter";
 import { getIntlConfig } from "./i18n";
 import { theme } from "./theme";
@@ -29,8 +30,7 @@ import { getIsEmulators, getStripePublicKey } from "./utils/env.utils";
 
 const firebaseConfig: FirebaseOptions = {
   apiKey:
-    import.meta.env.VITE_FIREBASE_API_KEY ||
-    "REDACTED_FIREBASE_API_KEYER",
+    import.meta.env.VITE_FIREBASE_API_KEY || "REDACTED_FIREBASE_API_KEYER",
   authDomain:
     import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "voquill-dev.firebaseapp.com",
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "voquill-dev",
@@ -130,6 +130,7 @@ const Main = ({ children }: ChildrenProps) => {
     <Main>
       <Elements stripe={stripePromise}>
         <SnackbarEmitter />
+        <DictionarySuggestionSnackbar />
         <AppWithLoading />
       </Elements>
     </Main>,
