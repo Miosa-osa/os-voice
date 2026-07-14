@@ -1,5 +1,5 @@
 use crate::domain::{KeysHeldPayload, EVT_KEYS_HELD};
-use rdev::{Event, EventType, Key as RdevKey};
+use rdev::{Button, Event, EventType, Key as RdevKey};
 use std::collections::HashSet;
 use std::env;
 use std::io::{BufRead, BufReader, BufWriter, ErrorKind, Write};
@@ -47,21 +47,30 @@ impl KeyEventEmitter {
             EventType::KeyRelease(key) => {
                 self.update_pressed_keys(key, false);
             }
+            EventType::ButtonPress(button) => {
+                self.set_pressed(button_to_label(button), true);
+            }
+            EventType::ButtonRelease(button) => {
+                self.set_pressed(button_to_label(button), false);
+            }
             _ => {}
         }
     }
 
     fn update_pressed_keys(&self, key: RdevKey, is_pressed: bool) {
-        let key_label = key_to_label(key);
+        self.set_pressed(key_to_label(key), is_pressed);
+    }
+
+    fn set_pressed(&self, label: String, is_pressed: bool) {
         let mut guard = self
             .pressed_keys
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let changed = if is_pressed {
-            guard.insert(key_label.clone())
+            guard.insert(label)
         } else {
-            guard.remove(&key_label)
+            guard.remove(&label)
         };
 
         if changed {
@@ -419,11 +428,17 @@ fn pump_stream(stream: TcpStream, emitter: Arc<KeyEventEmitter>) -> Result<(), S
 }
 
 fn event_from_payload(payload: KeyboardEventPayload) -> Option<Event> {
-    let key = key_from_payload(&payload.key_label, payload.raw_code)?;
-
-    let event_type = match payload.kind {
-        WireEventKind::Press => EventType::KeyPress(key),
-        WireEventKind::Release => EventType::KeyRelease(key),
+    let event_type = if let Some(button) = label_to_button(&payload.key_label) {
+        match payload.kind {
+            WireEventKind::Press => EventType::ButtonPress(button),
+            WireEventKind::Release => EventType::ButtonRelease(button),
+        }
+    } else {
+        let key = key_from_payload(&payload.key_label, payload.raw_code)?;
+        match payload.kind {
+            WireEventKind::Press => EventType::KeyPress(key),
+            WireEventKind::Release => EventType::KeyRelease(key),
+        }
     };
 
     Some(Event {
@@ -475,6 +490,27 @@ pub(crate) fn key_raw_code(key: RdevKey) -> Option<u32> {
     match key {
         RdevKey::Unknown(code) => Some(code),
         _ => None,
+    }
+}
+
+pub(crate) fn button_to_label(button: Button) -> String {
+    match button {
+        Button::Left => "MouseLeft".to_string(),
+        Button::Right => "MouseRight".to_string(),
+        Button::Middle => "MouseMiddle".to_string(),
+        Button::Unknown(code) => format!("MouseButton{code}"),
+    }
+}
+
+fn label_to_button(label: &str) -> Option<Button> {
+    match label {
+        "MouseLeft" => Some(Button::Left),
+        "MouseRight" => Some(Button::Right),
+        "MouseMiddle" => Some(Button::Middle),
+        _ => label
+            .strip_prefix("MouseButton")
+            .and_then(|code| code.parse().ok())
+            .map(Button::Unknown),
     }
 }
 
@@ -693,6 +729,18 @@ pub(crate) fn run_listen_loop(
                 kind: WireEventKind::Release,
                 key_label: key_to_label(key),
                 raw_code: key_raw_code(key),
+                scan_code: scan_code_fn(&event),
+            }),
+            EventType::ButtonPress(button) => Some(KeyboardEventPayload {
+                kind: WireEventKind::Press,
+                key_label: button_to_label(button),
+                raw_code: None,
+                scan_code: scan_code_fn(&event),
+            }),
+            EventType::ButtonRelease(button) => Some(KeyboardEventPayload {
+                kind: WireEventKind::Release,
+                key_label: button_to_label(button),
+                raw_code: None,
                 scan_code: scan_code_fn(&event),
             }),
             _ => None,
