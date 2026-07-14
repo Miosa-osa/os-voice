@@ -31,6 +31,7 @@ import { PermissionMap } from "../types/permission.types";
 import { AgentRunState } from "./agent.state";
 import { ChatState, INITIAL_CHAT_STATE } from "./chat.state";
 import { DictionaryState, INITIAL_DICTIONARY_STATE } from "./dictionary.state";
+import { INITIAL_VOCAB_STATE, VocabState } from "./vocab.state";
 import { INITIAL_INSIGHTS_STATE, InsightsState } from "./insights.state";
 import { INITIAL_LOCAL_STATE, LocalState } from "./local.state";
 import { INITIAL_LOGIN_STATE, LoginState } from "./login.state";
@@ -125,6 +126,7 @@ export type AppState = {
   onboarding: OnboardingState;
   transcriptions: TranscriptionsState;
   dictionary: DictionaryState;
+  vocab: VocabState;
   insights: InsightsState;
   tones: TonesState;
   toneEditor: ToneEditorState;
@@ -206,6 +208,7 @@ export const INITIAL_APP_STATE: AppState = {
   onboarding: INITIAL_ONBOARDING_STATE,
   transcriptions: INITIAL_TRANSCRIPTIONS_STATE,
   dictionary: INITIAL_DICTIONARY_STATE,
+  vocab: INITIAL_VOCAB_STATE,
   insights: INITIAL_INSIGHTS_STATE,
   tones: INITIAL_TONES_STATE,
   toneEditor: INITIAL_TONE_EDITOR_STATE,
