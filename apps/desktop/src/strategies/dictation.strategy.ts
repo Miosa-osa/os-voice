@@ -2,11 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Nullable } from "@voquill/types";
 import { showErrorSnackbar, showSnackbar } from "../actions/app.actions";
 import { tryRegisterCurrentAppTarget } from "../actions/app-target.actions";
+import { recordDictationEvent } from "../actions/insights.actions";
 import { showToast } from "../actions/toast.actions";
 import {
   postProcessTranscript,
   type PostProcessMetadata,
 } from "../actions/transcribe.actions";
+import { countWordChanges } from "../lib/insights/compute";
 import { getIntl } from "../i18n";
 import { getAppState } from "../store";
 import type { OverlayPhase } from "../types/overlay.types";
@@ -211,6 +213,29 @@ export class DictationStrategy extends BaseStrategy {
           }
 
           getLogger().info("Transcript output routed successfully");
+
+          try {
+            const finalTranscript = transcript;
+            void recordDictationEvent({
+              wordCount: finalTranscript.trim().split(/\s+/).filter(Boolean)
+                .length,
+              charCount: finalTranscript.length,
+              appName: args.currentApp?.name ?? null,
+              appTargetId: args.currentApp?.id ?? null,
+              toneId: args.toneId,
+              correctionCount:
+                countWordChanges(args.rawTranscript, finalTranscript) +
+                postProcessWarnings.length,
+              transcriptionDurationMs:
+                args.transcriptionMetadata.transcriptionDurationMs ?? null,
+              postprocessDurationMs:
+                postProcessMetadata.postprocessDurationMs ?? null,
+            });
+          } catch (insightsError) {
+            getLogger().verbose(
+              `Failed to record insights event: ${insightsError}`,
+            );
+          }
         } catch (error) {
           getLogger().error(`Failed to route transcription output: ${error}`);
           showErrorSnackbar(

@@ -6,6 +6,7 @@ import DashboardPage from "./components/dashboard/DashboardPage.tsx";
 import DictionaryPage from "./components/dictionary/DictionaryPage.tsx";
 import EnterpriseRoutingPage from "./components/enterprise/EnterpriseRoutingPage.tsx";
 import HomePage from "./components/home/HomePage.tsx";
+import InsightsPage from "./components/insights/InsightsPage.tsx";
 import LoginPage from "./components/login/LoginPage.tsx";
 import OnboardingPage from "./components/onboarding/OnboardingPage.tsx";
 import ErrorBoundary from "./components/root/ErrorBoundary.tsx";
@@ -115,6 +116,10 @@ export const browserRouter = createBrowserRouter([
               {
                 path: "dictionary",
                 element: <DictionaryPage />,
+              },
+              {
+                path: "insights",
+                element: <InsightsPage />,
               },
               {
                 path: "styling",
