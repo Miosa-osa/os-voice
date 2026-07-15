@@ -29,8 +29,7 @@ import { getIsEmulators, getStripePublicKey } from "./utils/env.utils";
 
 const firebaseConfig: FirebaseOptions = {
   apiKey:
-    import.meta.env.VITE_FIREBASE_API_KEY ||
-    "REDACTED_FIREBASE_API_KEYER",
+    import.meta.env.VITE_FIREBASE_API_KEY || "REDACTED_FIREBASE_API_KEYER",
   authDomain:
     import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "voquill-dev.firebaseapp.com",
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "voquill-dev",
