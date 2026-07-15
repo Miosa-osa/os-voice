@@ -4,6 +4,7 @@ import {
   tryRegisterCurrentAppTarget,
 } from "../../actions/app-target.actions";
 import { loadDictionary } from "../../actions/dictionary.actions";
+import { refreshLearnedVocabulary } from "../../actions/vocab.actions";
 import { loadHotkeys } from "../../actions/hotkey.actions";
 import {
   handleEnterpriseOidcPayload,
@@ -49,6 +50,7 @@ export const RootSideEffects = () => {
       migratePreferredMicrophoneToPreferences(),
     ];
     await Promise.allSettled(loaders);
+    void refreshLearnedVocabulary();
     getLogger().info("Initial data load complete");
   }, [userId]);
 

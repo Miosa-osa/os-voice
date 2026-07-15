@@ -988,6 +988,28 @@ pub async fn term_delete(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn insights_record_event(
+    event: crate::domain::DictationEvent,
+    database: State<'_, crate::state::OptionKeyDatabase>,
+) -> Result<(), String> {
+    crate::db::dictation_event_queries::insert_dictation_event(database.pool(), &event)
+        .await
+        .map(|_| ())
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn insights_list_events(
+    database: State<'_, crate::state::OptionKeyDatabase>,
+) -> Result<Vec<crate::domain::DictationEvent>, String> {
+    crate::db::dictation_event_queries::fetch_dictation_events(database.pool())
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn hotkey_list(
     database: State<'_, crate::state::OptionKeyDatabase>,
 ) -> Result<Vec<crate::domain::Hotkey>, String> {

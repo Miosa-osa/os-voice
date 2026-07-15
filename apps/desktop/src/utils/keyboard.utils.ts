@@ -103,6 +103,16 @@ export const getPrettyKeyName = (key: string): string => {
   if (key === "UpArrow") return "↑";
   if (key === "DownArrow") return "↓";
 
+  if (key === "MouseLeft") return "Left Click";
+  if (key === "MouseRight") return "Right Click";
+  if (key === "MouseMiddle") return "Middle Click";
+  if (key.startsWith("MouseButton")) {
+    const button = key.slice("MouseButton".length);
+    if (button === "8") return "Mouse Back";
+    if (button === "9") return "Mouse Forward";
+    return `Mouse ${button}`;
+  }
+
   return key;
 };
 

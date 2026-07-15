@@ -2,6 +2,7 @@ pub mod api_key_queries;
 pub mod app_target_queries;
 pub mod chat_message_queries;
 pub mod conversation_queries;
+pub mod dictation_event_queries;
 pub mod hotkey_queries;
 pub mod paired_remote_device_queries;
 pub mod preferences_queries;
@@ -14,6 +15,8 @@ pub const DB_FILENAME: &str = "voquill.db";
 pub const DB_CONNECTION: &str = "sqlite:voquill.db";
 
 pub const SCHEMA_SQL: &str = include_str!("migrations/000_schema.sql");
+pub const DICTATION_EVENTS_MIGRATION_SQL: &str =
+    include_str!("migrations/069_dictation_events.sql");
 pub const USER_PROFILES_MIGRATION_SQL: &str = include_str!("migrations/001_user_profiles.sql");
 pub const TRANSCRIPTIONS_MIGRATION_SQL: &str = include_str!("migrations/002_transcriptions.sql");
 pub const TERMS_MIGRATION_SQL: &str = include_str!("migrations/003_terms.sql");
@@ -538,6 +541,12 @@ pub fn migrations() -> Vec<tauri_plugin_sql::Migration> {
             version: 68,
             description: "add_app_target_insertion_method",
             sql: APP_TARGET_INSERTION_METHOD_MIGRATION_SQL,
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
+        tauri_plugin_sql::Migration {
+            version: 69,
+            description: "create_dictation_events",
+            sql: DICTATION_EVENTS_MIGRATION_SQL,
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
     ]

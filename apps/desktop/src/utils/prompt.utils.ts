@@ -11,6 +11,7 @@ import {
 } from "./language.utils";
 import { ToneConfig } from "./tone.utils";
 import { getMyUserName } from "./user.utils";
+import { getLearnedVocabulary } from "./vocab.utils";
 
 const sanitizeGlossaryValue = (value: string): string =>
   // oxlint-disable-next-line no-control-regex
@@ -69,6 +70,10 @@ export const collectDictionaryEntries = (
   // These should always be added to the vocabulary
   recordSource("OS Voice");
   recordSource(getMyUserName(state));
+
+  for (const learnedWord of getLearnedVocabulary(state)) {
+    recordSource(learnedWord);
+  }
 
   return {
     sources: Array.from(sources.values()),

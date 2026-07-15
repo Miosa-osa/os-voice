@@ -4,6 +4,7 @@ import {
   HelpOutline,
   HistoryOutlined,
   HomeOutlined,
+  InsightsOutlined,
   PaletteOutlined,
   SettingsOutlined,
 } from "@mui/icons-material";
@@ -65,6 +66,11 @@ export const DashboardMenu = ({ onChoose }: DashboardMenuProps) => {
         label: <FormattedMessage defaultMessage="Styles" />,
         path: "/dashboard/styling",
         icon: <PaletteOutlined />,
+      },
+      {
+        label: <FormattedMessage defaultMessage="Insights" />,
+        path: "/dashboard/insights",
+        icon: <InsightsOutlined />,
       },
       ...(assistantModeEnabled
         ? [

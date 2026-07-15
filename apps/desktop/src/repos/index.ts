@@ -17,6 +17,7 @@ import { BaseApiKeyRepo, LocalApiKeyRepo } from "./api-key.repo";
 import { BaseAppTargetRepo, LocalAppTargetRepo } from "./app-target.repo";
 import { BaseAuthRepo, CloudAuthRepo, EnterpriseAuthRepo } from "./auth.repo";
 import { BaseChatMessageRepo, LocalChatMessageRepo } from "./chat-message.repo";
+import { InsightsRepo } from "./insights.repo";
 import {
   BaseConfigRepo,
   CloudConfigRepo,
@@ -171,6 +172,10 @@ export const getRemoteReceiverRepo = (): BaseRemoteReceiverRepo => {
 
 export const getTranscriptionRepo = (): BaseTranscriptionRepo => {
   return new LocalTranscriptionRepo();
+};
+
+export const getInsightsRepo = (): InsightsRepo => {
+  return new InsightsRepo();
 };
 
 export const getAppTargetRepo = (): BaseAppTargetRepo => {

@@ -1,12 +1,15 @@
 import { Transcription } from "@voquill/types";
 import { getRec } from "@voquill/utilities";
-import { getTranscriptionRepo } from "../repos";
+import { getTermRepo, getTranscriptionRepo } from "../repos";
 import { getAppState, produceAppState } from "../store";
 import {
   applyReplacements,
   applySymbolConversions,
 } from "../utils/string.utils";
+import { learnTermsFromEdit } from "../lib/insights/compute";
+import { createId } from "../utils/id.utils";
 import { postProcessTranscript, transcribeAudio } from "./transcribe.actions";
+import { loadDictionary } from "./dictionary.actions";
 
 export const openTranscriptionDetailsDialog = (transcriptionId: string) => {
   produceAppState((draft) => {
@@ -129,4 +132,50 @@ export const retranscribeTranscription = async ({
   produceAppState((draft) => {
     draft.transcriptionById[transcriptionId] = updated;
   });
+};
+
+// Saves a user-corrected transcript and auto-learns clean single-word fixes
+// into the dictionary (Wispr-Flow-style "learns from your corrections").
+export const saveTranscriptionEdit = async (
+  transcriptionId: string,
+  newTranscript: string,
+): Promise<number> => {
+  const state = getAppState();
+  const transcription = getRec(state.transcriptionById, transcriptionId);
+  if (!transcription) {
+    return 0;
+  }
+
+  const oldText = transcription.transcript ?? "";
+  if (newTranscript.trim() === oldText.trim()) {
+    return 0;
+  }
+
+  const updated = await getTranscriptionRepo().updateTranscription({
+    ...transcription,
+    transcript: newTranscript,
+  });
+  produceAppState((draft) => {
+    draft.transcriptionById[transcriptionId] = updated;
+  });
+
+  const existingSources = new Set(
+    Object.values(getAppState().termById).map((term) =>
+      term.sourceValue.toLowerCase(),
+    ),
+  );
+  const learned = learnTermsFromEdit(oldText, newTranscript, existingSources);
+  for (const { source, destination } of learned) {
+    await getTermRepo().createTerm({
+      id: createId(),
+      createdAt: new Date().toISOString(),
+      sourceValue: source,
+      destinationValue: destination,
+      isReplacement: true,
+    });
+  }
+  if (learned.length > 0) {
+    await loadDictionary();
+  }
+  return learned.length;
 };

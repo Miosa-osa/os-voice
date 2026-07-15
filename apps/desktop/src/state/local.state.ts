@@ -1,3 +1,5 @@
+import { StoredVoiceProfile } from "../lib/insights/profile.types";
+
 export type LocalState = {
   assistantModeEnabled: boolean;
   powerModeEnabled: boolean;
@@ -10,6 +12,7 @@ export type LocalState = {
   hasHiddenTrialExtensionCard: boolean;
   disableAutoStyleLoading?: boolean;
   optInToBetaUpdates: boolean;
+  voiceProfiles?: StoredVoiceProfile[];
 };
 
 export const INITIAL_LOCAL_STATE: LocalState = {

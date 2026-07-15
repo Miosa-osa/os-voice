@@ -263,6 +263,8 @@ pub fn build() -> tauri::Builder<tauri::Wry> {
             crate::commands::term_update,
             crate::commands::term_list,
             crate::commands::term_delete,
+            crate::commands::insights_record_event,
+            crate::commands::insights_list_events,
             crate::commands::hotkey_list,
             crate::commands::hotkey_save,
             crate::commands::hotkey_delete,
