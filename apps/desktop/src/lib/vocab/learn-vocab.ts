@@ -311,17 +311,45 @@ const COMMON_WORDS = new Set<string>([
   "thats",
   "were",
   "its",
+  "alright",
+  "hey",
+  "hi",
+  "hello",
+  "thanks",
+  "thank",
+  "oh",
+  "um",
+  "uh",
+  "hmm",
+  "wow",
+  "bye",
+  "cool",
+  "nice",
+  "sure",
+  "cause",
+  "anything",
+  "everything",
+  "nothing",
+  "everyone",
+  "anyone",
+  "somebody",
+  "anybody",
+  "everybody",
 ]);
 
 const TOKEN_RE = /[A-Za-z][A-Za-z0-9'’-]*[A-Za-z0-9]|[A-Za-z]/g;
 
-const distinctiveness = (token: string): number => {
+const isCapitalizedWord = (token: string): boolean =>
+  /^[A-Z][a-z]+$/.test(token);
+
+const strongDistinctiveness = (token: string): number => {
   if (/^[A-Z0-9]{2,}$/.test(token) && /[A-Z]/.test(token)) return 3;
   if (/[a-z][A-Z]/.test(token)) return 3;
   if (/[A-Za-z]/.test(token) && /[0-9]/.test(token)) return 3;
-  if (/^[A-Z][a-z]+$/.test(token)) return 2;
   return 0;
 };
+
+const sentencesOf = (text: string): string[] => text.split(/[.!?\n]+/);
 
 export type LearnVocabOptions = { excluded?: Set<string>; max?: number };
 
@@ -338,6 +366,30 @@ export const learnVocabulary = (
   excluded.add("os");
   excluded.add("voice");
 
+  // A capitalized word only counts as a name if it appears capitalized away
+  // from the start of a sentence — start-of-sentence caps are just grammar.
+  const properNouns = new Set<string>();
+  for (const text of transcripts) {
+    if (!text) continue;
+    for (const sentence of sentencesOf(text)) {
+      const tokens = sentence.match(TOKEN_RE) ?? [];
+      tokens.forEach((token, index) => {
+        if (index > 0 && isCapitalizedWord(token)) {
+          properNouns.add(token.toLowerCase());
+        }
+      });
+    }
+  }
+
+  const weightOf = (token: string): number => {
+    const strong = strongDistinctiveness(token);
+    if (strong > 0) return strong;
+    if (isCapitalizedWord(token) && properNouns.has(token.toLowerCase())) {
+      return 2;
+    }
+    return 0;
+  };
+
   const unigrams = new Map<string, Entry>();
   const bigrams = new Map<string, Entry>();
 
@@ -347,41 +399,41 @@ export const learnVocabulary = (
     if (/^\d+$/.test(token)) return false;
     if (COMMON_WORDS.has(lower)) return false;
     if (excluded.has(lower)) return false;
-    return distinctiveness(token) > 0;
+    return weightOf(token) > 0;
   };
 
   for (const text of transcripts) {
     if (!text) continue;
-    const tokens = text.match(TOKEN_RE) ?? [];
-    let prev: string | null = null;
+    for (const sentence of sentencesOf(text)) {
+      const tokens = sentence.match(TOKEN_RE) ?? [];
+      let prev: string | null = null;
 
-    for (const token of tokens) {
-      if (isCandidate(token)) {
-        const key = token.toLowerCase();
-        const existing = unigrams.get(key);
-        if (existing) {
-          existing.count += 1;
-          if (distinctiveness(token) > distinctiveness(existing.display)) {
-            existing.display = token;
+      for (const token of tokens) {
+        if (isCandidate(token)) {
+          const key = token.toLowerCase();
+          const weight = weightOf(token);
+          const existing = unigrams.get(key);
+          if (existing) {
+            existing.count += 1;
+            if (weight > existing.weight) {
+              existing.weight = weight;
+              existing.display = token;
+            }
+          } else {
+            unigrams.set(key, { display: token, count: 1, weight });
           }
-        } else {
-          unigrams.set(key, {
-            display: token,
-            count: 1,
-            weight: distinctiveness(token),
-          });
-        }
 
-        if (prev && /^[A-Z]/.test(prev) && /^[A-Z]/.test(token)) {
-          const phrase = `${prev} ${token}`;
-          const bkey = phrase.toLowerCase();
-          const bexisting = bigrams.get(bkey);
-          if (bexisting) bexisting.count += 1;
-          else bigrams.set(bkey, { display: phrase, count: 1, weight: 4 });
+          if (prev && /^[A-Z]/.test(prev) && /^[A-Z]/.test(token)) {
+            const phrase = `${prev} ${token}`;
+            const bkey = phrase.toLowerCase();
+            const bexisting = bigrams.get(bkey);
+            if (bexisting) bexisting.count += 1;
+            else bigrams.set(bkey, { display: phrase, count: 1, weight: 4 });
+          }
+          prev = token;
+        } else {
+          prev = null;
         }
-        prev = token;
-      } else {
-        prev = null;
       }
     }
   }

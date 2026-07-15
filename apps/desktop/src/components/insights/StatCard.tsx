@@ -7,13 +7,20 @@ export type StatCardProps = {
 };
 
 export const StatCard = ({ label, value, hint }: StatCardProps) => (
-  <Card sx={{ p: 2, flex: 1, minWidth: 150 }}>
+  <Card
+    variant="outlined"
+    sx={{ p: 2, flex: 1, minWidth: 150, borderRadius: 2 }}
+  >
     <Stack spacing={0.5}>
-      <Typography variant="h4" fontWeight={700}>
-        {value}
-      </Typography>
-      <Typography variant="body2" color="textSecondary">
+      <Typography
+        variant="overline"
+        color="textSecondary"
+        sx={{ lineHeight: 1.4 }}
+      >
         {label}
+      </Typography>
+      <Typography variant="h4" fontWeight={700} sx={{ lineHeight: 1.1 }}>
+        {value}
       </Typography>
       {hint && (
         <Typography variant="caption" color="textSecondary">
