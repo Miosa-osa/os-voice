@@ -24,6 +24,12 @@ import {
   setRealtimeOutputEnabled,
   setStylingMode,
 } from "../../actions/user.actions";
+import {
+  applyRecommendedTranscription,
+  detectAndRecommend,
+  setLiteMode,
+} from "../../actions/hardware.actions";
+import { showErrorSnackbar, showSnackbar } from "../../actions/app.actions";
 import { produceAppState, useAppStore } from "../../store";
 import {
   getEffectiveDictationLimitMinutes,
@@ -156,6 +162,41 @@ export const MoreSettingsDialog = () => {
 
   const handleToggleRealtimeOutput = (event: ChangeEvent<HTMLInputElement>) => {
     void setRealtimeOutputEnabled(event.target.checked);
+  };
+
+  const liteMode = useAppStore((state) => state.local.liteMode ?? false);
+  const [optimizing, setOptimizing] = useState(false);
+
+  const handleToggleLiteMode = (event: ChangeEvent<HTMLInputElement>) => {
+    void setLiteMode(event.target.checked);
+  };
+
+  const handleOptimizeForComputer = async () => {
+    setOptimizing(true);
+    try {
+      const { cap, rec } = await detectAndRecommend();
+      await applyRecommendedTranscription(rec);
+      const where = rec.device.startsWith("gpu")
+        ? (cap.gpuName ?? "GPU")
+        : intl.formatMessage(
+            { defaultMessage: "CPU ({cores} cores)" },
+            { cores: cap.cpuCores },
+          );
+      showSnackbar(
+        intl.formatMessage(
+          { defaultMessage: "Detected {where} — using the {model} model." },
+          { where, model: rec.modelSize },
+        ),
+      );
+    } catch {
+      showErrorSnackbar(
+        intl.formatMessage({
+          defaultMessage: "Couldn't detect your hardware. Please try again.",
+        }),
+      );
+    } finally {
+      setOptimizing(false);
+    }
   };
 
   const handleToggleDisablePillRewards = (
@@ -335,6 +376,43 @@ export const MoreSettingsDialog = () => {
                 edge="end"
                 checked={realtimeOutputEnabled}
                 onChange={handleToggleRealtimeOutput}
+              />
+            }
+          />
+
+          <SettingSection
+            title={
+              <FormattedMessage defaultMessage="Optimize for this computer" />
+            }
+            description={
+              <FormattedMessage defaultMessage="Detect your GPU, CPU, and memory and automatically pick the fastest transcription model this machine can run." />
+            }
+            action={
+              <Button
+                variant="outlined"
+                size="small"
+                disabled={optimizing}
+                onClick={() => void handleOptimizeForComputer()}
+              >
+                {optimizing ? (
+                  <FormattedMessage defaultMessage="Detecting…" />
+                ) : (
+                  <FormattedMessage defaultMessage="Detect" />
+                )}
+              </Button>
+            }
+          />
+
+          <SettingSection
+            title={<FormattedMessage defaultMessage="Lite mode" />}
+            description={
+              <FormattedMessage defaultMessage="For older or slower computers: uses the smallest model, keeps Verbatim (no AI cleanup), and turns off the AI voice profile." />
+            }
+            action={
+              <Switch
+                edge="end"
+                checked={liteMode}
+                onChange={handleToggleLiteMode}
               />
             }
           />
