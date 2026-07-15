@@ -11,7 +11,7 @@ import {
   computeUsage,
   computeUsageExtras,
 } from "../../lib/insights/compute";
-import { ContributionHeatmap } from "./ContributionHeatmap";
+import { DailyActivity } from "./DailyActivity";
 import { InsightsEmpty } from "./InsightsEmpty";
 import { MiniBars } from "./MiniBars";
 import { MiniLine } from "./MiniLine";
@@ -114,15 +114,12 @@ export const YourUsageTab = () => {
       </Stack>
 
       <Section title={<FormattedMessage defaultMessage="Daily activity" />}>
-        <Stack spacing={1.5}>
-          <ContributionHeatmap cells={usage.heatmap} />
-          <Typography variant="body2" color="textSecondary">
-            <FormattedMessage
-              defaultMessage="Current streak: {c} days · Longest: {l} days"
-              values={{ c: usage.currentStreak, l: usage.longestStreak }}
-            />
-          </Typography>
-        </Stack>
+        <DailyActivity
+          usage={usage}
+          extras={extras}
+          events={events}
+          transcriptions={transcriptions}
+        />
       </Section>
 
       <Section title={<FormattedMessage defaultMessage="When you dictate" />}>
@@ -140,13 +137,6 @@ export const YourUsageTab = () => {
             </Typography>
           )}
         </Stack>
-      </Section>
-
-      <Section title={<FormattedMessage defaultMessage="Last 30 days" />}>
-        <MiniBars
-          data={extras.dailyTrend.map((d) => d.words)}
-          labels={extras.dailyTrend.map((d) => dayjs(d.date).format("MMM D"))}
-        />
       </Section>
 
       <Section title={<FormattedMessage defaultMessage="Trends" />}>

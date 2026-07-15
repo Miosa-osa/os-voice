@@ -1,13 +1,13 @@
 import { Box, Stack, Tooltip, Typography } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import dayjs from "dayjs";
-import { FormattedMessage } from "react-intl";
+import { FormattedMessage, useIntl } from "react-intl";
 import { HeatmapCell } from "../../lib/insights/compute";
 
-const CELL = 11;
+const CELL = 13;
 const GAP = 3;
 const COL = CELL + GAP;
-const LABEL_W = 28;
+const LABEL_W = 30;
 
 const RAMP = {
   light: {
@@ -22,9 +22,16 @@ const RAMP = {
 
 const WEEKDAY_LABELS = ["", "Mon", "", "Wed", "", "Fri", ""];
 
-export const ContributionHeatmap = ({ cells }: { cells: HeatmapCell[] }) => {
+export const ContributionHeatmap = ({
+  cells,
+  onDayClick,
+}: {
+  cells: HeatmapCell[];
+  onDayClick?: (date: string, anchor: HTMLElement) => void;
+}) => {
   const mode = useTheme().palette.mode;
   const ramp = RAMP[mode];
+  const intl = useIntl();
 
   const colorFor = (level: number): string =>
     level <= 0 ? ramp.empty : ramp.steps[Math.min(level, 4) - 1];
@@ -44,6 +51,30 @@ export const ContributionHeatmap = ({ cells }: { cells: HeatmapCell[] }) => {
       monthLabels.push({ col, label: dayjs(first.date).format("MMM") });
       lastMonth = month;
     }
+  });
+
+  const cellSx = (color: string) => ({
+    width: CELL,
+    height: CELL,
+    borderRadius: "3px",
+    backgroundColor: color,
+    p: 0,
+    border: "none",
+    display: "block",
+    ...(onDayClick && {
+      cursor: "pointer",
+      transition: "outline-color 80ms ease",
+      "&:hover": {
+        outline: "2px solid",
+        outlineColor: "text.primary",
+        outlineOffset: "1px",
+      },
+      "&:focus-visible": {
+        outline: "2px solid",
+        outlineColor: "primary.main",
+        outlineOffset: "1px",
+      },
+    }),
   });
 
   return (
@@ -83,22 +114,34 @@ export const ContributionHeatmap = ({ cells }: { cells: HeatmapCell[] }) => {
           <Stack direction="row" spacing={`${GAP}px`}>
             {weeks.map((week, weekIndex) => (
               <Stack key={weekIndex} spacing={`${GAP}px`}>
-                {week.map((cell) => (
-                  <Tooltip
-                    key={cell.date}
-                    disableInteractive
-                    title={`${cell.words.toLocaleString()} words · ${dayjs(cell.date).format("MMM D, YYYY")}`}
-                  >
-                    <Box
-                      sx={{
-                        width: CELL,
-                        height: CELL,
-                        borderRadius: "2px",
-                        backgroundColor: colorFor(cell.level),
-                      }}
-                    />
-                  </Tooltip>
-                ))}
+                {week.map((cell) => {
+                  const label = intl.formatMessage(
+                    {
+                      defaultMessage: "{words} words on {date}",
+                    },
+                    {
+                      words: cell.words.toLocaleString(),
+                      date: dayjs(cell.date).format("MMM D, YYYY"),
+                    },
+                  );
+                  return (
+                    <Tooltip key={cell.date} disableInteractive title={label}>
+                      {onDayClick ? (
+                        <Box
+                          component="button"
+                          type="button"
+                          aria-label={label}
+                          onClick={(e) =>
+                            onDayClick(cell.date, e.currentTarget)
+                          }
+                          sx={cellSx(colorFor(cell.level))}
+                        />
+                      ) : (
+                        <Box sx={cellSx(colorFor(cell.level))} />
+                      )}
+                    </Tooltip>
+                  );
+                })}
               </Stack>
             ))}
           </Stack>
@@ -124,7 +167,7 @@ export const ContributionHeatmap = ({ cells }: { cells: HeatmapCell[] }) => {
               sx={{
                 width: CELL,
                 height: CELL,
-                borderRadius: "2px",
+                borderRadius: "3px",
                 backgroundColor: colorFor(level),
               }}
             />
