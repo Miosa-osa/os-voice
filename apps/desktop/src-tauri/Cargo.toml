@@ -37,6 +37,7 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-r
 thiserror = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
 cpal = "0.15"
+sysinfo = "0.32"
 tauri-plugin-os = "2.3.1"
 rdev = { git = "https://github.com/josiahsrc/rdev" }
 strum = "0.24"

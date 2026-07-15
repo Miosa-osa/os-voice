@@ -114,20 +114,26 @@ export const generateVoiceProfile = async (opts?: {
   const samples = sampleTranscripts(transcriptions);
 
   let profile: AiVoiceProfile;
+  const liteMode = state.local.liteMode === true;
   try {
-    const gen = getGenerateTextRepo();
-    if (!gen.repo) throw new Error("no generation model configured");
-    const output = await gen.repo.generateText({
-      system: buildProfileSystemPrompt(),
-      prompt: buildProfileUserPrompt({
-        usage,
-        profile: base,
-        words,
-        samples,
-        previousIdentity: latest?.profile.identity ?? null,
-      }),
-    });
-    profile = parseProfileResponse(output.text) ?? templatedProfile(base);
+    if (liteMode) {
+      // Lite mode skips the local LLM entirely to stay light on weak hardware.
+      profile = templatedProfile(base);
+    } else {
+      const gen = getGenerateTextRepo();
+      if (!gen.repo) throw new Error("no generation model configured");
+      const output = await gen.repo.generateText({
+        system: buildProfileSystemPrompt(),
+        prompt: buildProfileUserPrompt({
+          usage,
+          profile: base,
+          words,
+          samples,
+          previousIdentity: latest?.profile.identity ?? null,
+        }),
+      });
+      profile = parseProfileResponse(output.text) ?? templatedProfile(base);
+    }
   } catch (error) {
     getLogger().warning(
       `Voice profile generation fell back to template: ${error}`,

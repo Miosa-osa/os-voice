@@ -494,6 +494,43 @@ pub fn list_gpus() -> Vec<crate::system::gpu::GpuAdapterInfo> {
     crate::system::gpu::list_available_gpus()
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceCapability {
+    pub has_usable_gpu: bool,
+    pub gpu_name: Option<String>,
+    pub cpu_cores: u32,
+    pub ram_gb: f32,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_device_capability() -> DeviceCapability {
+    let usable = crate::system::gpu::list_available_gpus().into_iter().find(|g| {
+        let name = g.name.to_lowercase();
+        matches!(g.device_type.as_str(), "DiscreteGpu" | "IntegratedGpu")
+            && !name.contains("llvmpipe")
+            && !name.contains("software")
+            && !name.contains("swiftshader")
+            && !name.contains("microsoft basic")
+    });
+
+    let cpu_cores = std::thread::available_parallelism()
+        .map(|n| n.get() as u32)
+        .unwrap_or(1);
+
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory();
+    let ram_gb = sys.total_memory() as f32 / 1_073_741_824.0;
+
+    DeviceCapability {
+        has_usable_gpu: usable.is_some(),
+        gpu_name: usable.map(|g| g.name),
+        cpu_cores,
+        ram_gb,
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn get_monitor_at_cursor() -> Option<crate::domain::MonitorAtCursor> {

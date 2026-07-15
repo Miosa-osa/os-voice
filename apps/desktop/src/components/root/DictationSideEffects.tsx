@@ -13,6 +13,7 @@ import {
   loadChatMessages,
   sendChatMessage,
 } from "../../actions/chat.actions";
+import { fallbackToCpuIfGpuFailed } from "../../actions/hardware.actions";
 import { refreshMember } from "../../actions/member.actions";
 import { dismissToast, showToast } from "../../actions/toast.actions";
 import {
@@ -342,10 +343,17 @@ export const DictationSideEffects = () => {
       currentAppToneId: appTarget?.toneId ?? null,
     });
 
-    const transcribeResult = await sessionRef.current?.finalize(audio, {
-      toneId,
-      a11yInfo,
-    });
+    const transcribeResult = await (async () => {
+      try {
+        return await sessionRef.current?.finalize(audio, {
+          toneId,
+          a11yInfo,
+        });
+      } catch (error) {
+        void fallbackToCpuIfGpuFailed();
+        throw error;
+      }
+    })();
     const rawTranscript = transcribeResult?.rawTranscript;
     getLogger().verbose(
       `Transcription result: rawTranscript=${rawTranscript ? `${rawTranscript.length} chars` : "empty"}, toneId=${toneId ?? "none"}, app=${appTarget?.name ?? "unknown"}`,

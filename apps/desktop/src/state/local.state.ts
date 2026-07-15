@@ -13,6 +13,7 @@ export type LocalState = {
   disableAutoStyleLoading?: boolean;
   optInToBetaUpdates: boolean;
   voiceProfiles?: StoredVoiceProfile[];
+  liteMode?: boolean;
 };
 
 export const INITIAL_LOCAL_STATE: LocalState = {
