@@ -499,8 +499,46 @@ export const computeVoiceProfile = (
   };
 };
 
+export const MILESTONE_SCHEDULE = [
+  2000, 5000, 10000, 25000, 50000, 100000, 250000,
+];
+export const PROFILE_UNLOCK_WORDS = 2000;
+export const SIGNATURE_UNLOCK_WORDS = 5000;
+export const WORD_ANALYSIS_UNLOCK_WORDS = 10000;
+
+// How many milestone thresholds the user has crossed (0 before 2k).
 export const milestoneFor = (totalWords: number): number =>
-  Math.floor(totalWords / MILESTONE_WORDS);
+  MILESTONE_SCHEDULE.filter((m) => totalWords >= m).length;
+
+export const nextMilestoneWords = (totalWords: number): number | null =>
+  MILESTONE_SCHEDULE.find((m) => m > totalWords) ?? null;
+
+// Extract clean single-word corrections from an edit (old -> new) so the
+// dictionary can auto-learn. Only clean 1:1 word substitutions are captured.
+export const learnTermsFromEdit = (
+  oldText: string,
+  newText: string,
+  existingSources: Set<string>,
+  max = 5,
+): { source: string; destination: string }[] => {
+  const wordRe = /[A-Za-z][A-Za-z'’-]*/g;
+  const a = oldText.match(wordRe) ?? [];
+  const b = newText.match(wordRe) ?? [];
+  if (a.length === 0 || a.length !== b.length) return [];
+  const out: { source: string; destination: string }[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < a.length && out.length < max; i += 1) {
+    const source = a[i];
+    const destination = b[i];
+    const key = source.toLowerCase();
+    if (source.length < 2 || destination.length < 2) continue;
+    if (key === destination.toLowerCase()) continue;
+    if (existingSources.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ source, destination });
+  }
+  return out;
+};
 
 export const computeLeaderboard = (
   events: LocalDictationEvent[],

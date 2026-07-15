@@ -5,20 +5,25 @@ import {
   Card,
   Chip,
   CircularProgress,
+  LinearProgress,
   Stack,
   Typography,
 } from "@mui/material";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
+import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import dayjs from "dayjs";
 import { FormattedMessage, useIntl } from "react-intl";
 import { Section } from "../common/Section";
 import {
-  MILESTONE_WORDS,
+  PROFILE_UNLOCK_WORDS,
+  SIGNATURE_UNLOCK_WORDS,
+  WORD_ANALYSIS_UNLOCK_WORDS,
   computeUsage,
   computeVoiceProfile,
   computeWordAnalysis,
   milestoneFor,
+  nextMilestoneWords,
 } from "../../lib/insights/compute";
 import { generateVoiceProfile } from "../../actions/insights.actions";
 import { useAppStore } from "../../store";
@@ -50,6 +55,36 @@ const ProfileRow = ({
   </Stack>
 );
 
+const LockedSection = ({
+  title,
+  unlockAt,
+  totalWords,
+}: {
+  title: React.ReactNode;
+  unlockAt: number;
+  totalWords: number;
+}) => (
+  <Section title={title}>
+    <Stack
+      direction="row"
+      spacing={1.5}
+      alignItems="center"
+      sx={{ py: 1, opacity: 0.75 }}
+    >
+      <LockOutlinedIcon fontSize="small" color="disabled" />
+      <Typography variant="body2" color="textSecondary">
+        <FormattedMessage
+          defaultMessage="Unlocks at {n} words · {left} to go"
+          values={{
+            n: unlockAt.toLocaleString(),
+            left: (unlockAt - totalWords).toLocaleString(),
+          }}
+        />
+      </Typography>
+    </Stack>
+  </Section>
+);
+
 export const YourVoiceTab = () => {
   const intl = useIntl();
   const { events, transcriptions, terms } = useInsightsSources();
@@ -72,7 +107,7 @@ export const YourVoiceTab = () => {
   );
 
   useEffect(() => {
-    if (totalWords > 0) {
+    if (totalWords >= PROFILE_UNLOCK_WORDS) {
       void generateVoiceProfile();
     }
   }, [totalWords, milestone]);
@@ -81,8 +116,41 @@ export const YourVoiceTab = () => {
     return <InsightsEmpty />;
   }
 
+  if (totalWords < PROFILE_UNLOCK_WORDS) {
+    const pct = Math.min(
+      100,
+      Math.round((totalWords / PROFILE_UNLOCK_WORDS) * 100),
+    );
+    return (
+      <Card variant="outlined" sx={{ p: 4 }}>
+        <Stack spacing={2} alignItems="center" textAlign="center">
+          <AutoAwesomeIcon color="primary" />
+          <Typography variant="h6" fontWeight={700}>
+            <FormattedMessage defaultMessage="Your voice profile is warming up" />
+          </Typography>
+          <Typography color="textSecondary">
+            <FormattedMessage
+              defaultMessage="It unlocks at {n} words — {left} to go. Keep dictating and we'll build a profile of how you speak."
+              values={{
+                n: PROFILE_UNLOCK_WORDS.toLocaleString(),
+                left: (PROFILE_UNLOCK_WORDS - totalWords).toLocaleString(),
+              }}
+            />
+          </Typography>
+          <Box sx={{ width: "100%", maxWidth: 340 }}>
+            <LinearProgress variant="determinate" value={pct} />
+            <Typography variant="caption" color="textSecondary">
+              {`${totalWords.toLocaleString()} / ${PROFILE_UNLOCK_WORDS.toLocaleString()}`}
+            </Typography>
+          </Box>
+        </Stack>
+      </Card>
+    );
+  }
+
   const loading = aiStatus === "loading";
-  const wordsToNext = (milestone + 1) * MILESTONE_WORDS - totalWords;
+  const next = nextMilestoneWords(totalWords);
+  const wordsToNext = next === null ? null : next - totalWords;
   const name = aiProfile?.name ?? fallback.name;
   const identity = aiProfile?.identity ?? fallback.description;
 
@@ -157,10 +225,14 @@ export const YourVoiceTab = () => {
           )}
 
           <Typography variant="caption" color="textSecondary">
-            <FormattedMessage
-              defaultMessage="Refreshes at your next milestone · {n} words to go"
-              values={{ n: wordsToNext.toLocaleString() }}
-            />
+            {wordsToNext === null ? (
+              <FormattedMessage defaultMessage="You've reached the top milestone — your profile keeps refining." />
+            ) : (
+              <FormattedMessage
+                defaultMessage="Evolves at your next milestone · {n} words to go"
+                values={{ n: wordsToNext.toLocaleString() }}
+              />
+            )}
           </Typography>
         </Stack>
       </Card>
@@ -171,63 +243,79 @@ export const YourVoiceTab = () => {
         </Section>
       )}
 
-      <Section title={<FormattedMessage defaultMessage="How you speak" />}>
-        <Box
-          sx={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-            gap: 2,
-          }}
-        >
-          <StatCard
-            label={<FormattedMessage defaultMessage="Vocabulary" />}
-            value={words.vocabularySize.toLocaleString()}
-            hint={<FormattedMessage defaultMessage="distinct words" />}
-          />
-          <StatCard
-            label={<FormattedMessage defaultMessage="Filler rate" />}
-            value={`${words.fillerRate}`}
-            hint={<FormattedMessage defaultMessage="per 100 words" />}
-          />
-          <StatCard
-            label={<FormattedMessage defaultMessage="Avg sentence" />}
-            value={`${words.avgSentenceLength}`}
-            hint={<FormattedMessage defaultMessage="words" />}
-          />
-          <StatCard
-            label={<FormattedMessage defaultMessage="Questions" />}
-            value={`${words.questionRatio}%`}
-            hint={<FormattedMessage defaultMessage="of sentences" />}
-          />
-        </Box>
-        {words.topPhrases.length > 0 && (
-          <Box pt={2}>
-            <Typography variant="caption" color="textSecondary">
-              <FormattedMessage defaultMessage="Your top phrases" />
-            </Typography>
-            <Box pt={1}>
-              <ChipRow items={words.topPhrases.map((p) => p.phrase)} />
-            </Box>
+      {totalWords >= WORD_ANALYSIS_UNLOCK_WORDS ? (
+        <Section title={<FormattedMessage defaultMessage="How you speak" />}>
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+              gap: 2,
+            }}
+          >
+            <StatCard
+              label={<FormattedMessage defaultMessage="Vocabulary" />}
+              value={words.vocabularySize.toLocaleString()}
+              hint={<FormattedMessage defaultMessage="distinct words" />}
+            />
+            <StatCard
+              label={<FormattedMessage defaultMessage="Filler rate" />}
+              value={`${words.fillerRate}`}
+              hint={<FormattedMessage defaultMessage="per 100 words" />}
+            />
+            <StatCard
+              label={<FormattedMessage defaultMessage="Avg sentence" />}
+              value={`${words.avgSentenceLength}`}
+              hint={<FormattedMessage defaultMessage="words" />}
+            />
+            <StatCard
+              label={<FormattedMessage defaultMessage="Questions" />}
+              value={`${words.questionRatio}%`}
+              hint={<FormattedMessage defaultMessage="of sentences" />}
+            />
           </Box>
-        )}
-      </Section>
+          {words.topPhrases.length > 0 && (
+            <Box pt={2}>
+              <Typography variant="caption" color="textSecondary">
+                <FormattedMessage defaultMessage="Your top phrases" />
+              </Typography>
+              <Box pt={1}>
+                <ChipRow items={words.topPhrases.map((p) => p.phrase)} />
+              </Box>
+            </Box>
+          )}
+        </Section>
+      ) : (
+        <LockedSection
+          title={<FormattedMessage defaultMessage="How you speak" />}
+          unlockAt={WORD_ANALYSIS_UNLOCK_WORDS}
+          totalWords={totalWords}
+        />
+      )}
 
-      <Section title={<FormattedMessage defaultMessage="Signature" />}>
-        <Stack spacing={2}>
-          <ProfileRow
-            label={<FormattedMessage defaultMessage="Catchphrase" />}
-            value={fallback.catchphrase}
-          />
-          <ProfileRow
-            label={<FormattedMessage defaultMessage="Most used word" />}
-            value={fallback.mostUsedWord}
-          />
-          <ProfileRow
-            label={<FormattedMessage defaultMessage="Most corrected word" />}
-            value={fallback.mostCorrectedWord}
-          />
-        </Stack>
-      </Section>
+      {totalWords >= SIGNATURE_UNLOCK_WORDS ? (
+        <Section title={<FormattedMessage defaultMessage="Signature" />}>
+          <Stack spacing={2}>
+            <ProfileRow
+              label={<FormattedMessage defaultMessage="Catchphrase" />}
+              value={fallback.catchphrase}
+            />
+            <ProfileRow
+              label={<FormattedMessage defaultMessage="Most used word" />}
+              value={fallback.mostUsedWord}
+            />
+            <ProfileRow
+              label={<FormattedMessage defaultMessage="Most corrected word" />}
+              value={fallback.mostCorrectedWord}
+            />
+          </Stack>
+        </Section>
+      ) : (
+        <LockedSection
+          title={<FormattedMessage defaultMessage="Signature" />}
+          unlockAt={SIGNATURE_UNLOCK_WORDS}
+          totalWords={totalWords}
+        />
+      )}
 
       <Section title={<FormattedMessage defaultMessage="Peak time & place" />}>
         <Stack spacing={2}>
@@ -271,9 +359,9 @@ export const YourVoiceTab = () => {
                     <Typography fontWeight={600}>{h.profile.name}</Typography>
                     <Typography variant="caption" color="textSecondary">
                       <FormattedMessage
-                        defaultMessage="{k}k words · {date}"
+                        defaultMessage="{n} words · {date}"
                         values={{
-                          k: (h.milestone + 1) * (MILESTONE_WORDS / 1000),
+                          n: h.totalWords.toLocaleString(),
                           date: dayjs(h.createdAt).format("MMM D"),
                         }}
                       />
@@ -286,7 +374,7 @@ export const YourVoiceTab = () => {
                       sx={{ maxWidth: 160, textAlign: "right" }}
                       noWrap
                     >
-                      “{h.catchphrase}”
+                      {`“${h.catchphrase}”`}
                     </Typography>
                   )}
                 </Stack>

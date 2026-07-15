@@ -10,6 +10,7 @@ import {
   computeVoiceProfile,
   computeWordAnalysis,
   milestoneFor,
+  PROFILE_UNLOCK_WORDS,
   sampleTranscripts,
   templatedProfile,
 } from "../lib/insights/compute";
@@ -61,7 +62,7 @@ export const generateVoiceProfile = async (opts?: {
   const transcriptions = Object.values(state.transcriptionById);
   const terms = Object.values(state.termById);
   const usage = computeUsage(events, transcriptions);
-  if (usage.totalWords === 0) return;
+  if (usage.totalWords < PROFILE_UNLOCK_WORDS) return;
   const milestone = milestoneFor(usage.totalWords);
 
   const existing = (state.local.voiceProfiles ?? []).find(

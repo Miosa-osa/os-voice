@@ -1,5 +1,6 @@
 import ReplayRoundedIcon from "@mui/icons-material/ReplayRounded";
 import {
+  Alert,
   Box,
   Button,
   Dialog,
@@ -8,14 +9,16 @@ import {
   DialogTitle,
   Divider,
   Stack,
+  TextField,
   Typography,
 } from "@mui/material";
 import { getRec } from "@voquill/utilities";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { FormattedMessage } from "react-intl";
 import {
   closeTranscriptionDetailsDialog,
   openRetranscribeDialog,
+  saveTranscriptionEdit,
 } from "../../actions/transcriptions.actions";
 import { AppState } from "../../state/app.state";
 import { useAppStore } from "../../store";
@@ -66,6 +69,10 @@ export const TranscriptionDetailsDialog = () => {
     return getRec(state.transcriptionById, transcriptionId);
   });
   const apiKeysById = useAppStore((state) => state.apiKeyById);
+
+  const [editText, setEditText] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [learnedCount, setLearnedCount] = useState<number | null>(null);
 
   const isRetranscribing = useAppStore((state) =>
     transcription?.id
@@ -241,6 +248,71 @@ export const TranscriptionDetailsDialog = () => {
                   }
                   monospace
                 />
+
+                <Box>
+                  {editText === null ? (
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        setEditText(finalTranscriptText ?? "");
+                        setLearnedCount(null);
+                      }}
+                    >
+                      <FormattedMessage defaultMessage="Correct this transcript" />
+                    </Button>
+                  ) : (
+                    <Stack spacing={1}>
+                      <TextField
+                        multiline
+                        minRows={2}
+                        fullWidth
+                        size="small"
+                        value={editText}
+                        onChange={(event) => setEditText(event.target.value)}
+                      />
+                      <Stack direction="row" spacing={1}>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          disabled={saving || !transcription}
+                          onClick={async () => {
+                            if (!transcription) {
+                              return;
+                            }
+                            setSaving(true);
+                            try {
+                              const n = await saveTranscriptionEdit(
+                                transcription.id,
+                                editText,
+                              );
+                              setLearnedCount(n);
+                              setEditText(null);
+                            } finally {
+                              setSaving(false);
+                            }
+                          }}
+                        >
+                          <FormattedMessage defaultMessage="Save & teach" />
+                        </Button>
+                        <Button size="small" onClick={() => setEditText(null)}>
+                          <FormattedMessage defaultMessage="Cancel" />
+                        </Button>
+                      </Stack>
+                    </Stack>
+                  )}
+                  {learnedCount !== null && (
+                    <Alert severity="success" sx={{ mt: 1 }}>
+                      {learnedCount > 0 ? (
+                        <FormattedMessage
+                          defaultMessage="Saved · learned {n} correction(s) into your dictionary"
+                          values={{ n: learnedCount }}
+                        />
+                      ) : (
+                        <FormattedMessage defaultMessage="Saved" />
+                      )}
+                    </Alert>
+                  )}
+                </Box>
               </Stack>
             </Box>
 
