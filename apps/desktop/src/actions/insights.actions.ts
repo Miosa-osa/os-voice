@@ -1,6 +1,28 @@
-import { getInsightsRepo, getTermRepo, getTranscriptionRepo } from "../repos";
+import {
+  getGenerateTextRepo,
+  getInsightsRepo,
+  getTermRepo,
+  getTranscriptionRepo,
+} from "../repos";
 import { LocalDictationEvent } from "../repos/insights.repo";
-import { produceAppState } from "../store";
+import {
+  computeUsage,
+  computeVoiceProfile,
+  computeWordAnalysis,
+  milestoneFor,
+  sampleTranscripts,
+  templatedProfile,
+} from "../lib/insights/compute";
+import {
+  buildProfileSystemPrompt,
+  buildProfileUserPrompt,
+  parseProfileResponse,
+} from "../lib/insights/profile-prompt";
+import {
+  AiVoiceProfile,
+  StoredVoiceProfile,
+} from "../lib/insights/profile.types";
+import { getAppState, produceAppState } from "../store";
 import { registerTerms, registerTranscriptions } from "../utils/app.utils";
 import { createId } from "../utils/id.utils";
 import { getLogger } from "../utils/log.utils";
@@ -29,6 +51,73 @@ export const loadInsights = async (): Promise<void> => {
       draft.insights.status = "error";
     });
   }
+};
+
+export const generateVoiceProfile = async (opts?: {
+  force?: boolean;
+}): Promise<void> => {
+  const state = getAppState();
+  const events = state.insights.events;
+  const transcriptions = Object.values(state.transcriptionById);
+  const terms = Object.values(state.termById);
+  const usage = computeUsage(events, transcriptions);
+  if (usage.totalWords === 0) return;
+  const milestone = milestoneFor(usage.totalWords);
+
+  const existing = (state.local.voiceProfiles ?? []).find(
+    (p) => p.milestone === milestone,
+  );
+  if (existing && !opts?.force) {
+    produceAppState((draft) => {
+      draft.insights.aiProfile = existing.profile;
+      draft.insights.aiProfileStatus = "success";
+    });
+    return;
+  }
+
+  produceAppState((draft) => {
+    draft.insights.aiProfileStatus = "loading";
+  });
+
+  const base = computeVoiceProfile(events, transcriptions, terms, milestone);
+  const words = computeWordAnalysis(transcriptions);
+  const samples = sampleTranscripts(transcriptions);
+
+  let profile: AiVoiceProfile;
+  try {
+    const gen = getGenerateTextRepo();
+    if (!gen.repo) throw new Error("no generation model configured");
+    const output = await gen.repo.generateText({
+      system: buildProfileSystemPrompt(),
+      prompt: buildProfileUserPrompt({ usage, profile: base, words, samples }),
+    });
+    profile = parseProfileResponse(output.text) ?? templatedProfile(base);
+  } catch (error) {
+    getLogger().warning(
+      `Voice profile generation fell back to template: ${error}`,
+    );
+    profile = templatedProfile(base);
+  }
+
+  const stored: StoredVoiceProfile = {
+    milestone,
+    createdAt: Date.now(),
+    totalWords: usage.totalWords,
+    profile,
+    catchphrase: base.catchphrase,
+    mostUsedWord: base.mostUsedWord,
+  };
+
+  produceAppState((draft) => {
+    draft.insights.aiProfile = profile;
+    draft.insights.aiProfileStatus = "success";
+    const history = (draft.local.voiceProfiles ?? []).filter(
+      (p) => p.milestone !== milestone,
+    );
+    history.push(stored);
+    history.sort((a, b) => a.milestone - b.milestone);
+    draft.local.voiceProfiles = history;
+  });
 };
 
 export type RecordDictationEventInput = {

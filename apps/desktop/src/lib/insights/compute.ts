@@ -1,6 +1,7 @@
 import dayjs from "dayjs";
 import { Term, Transcription } from "@voquill/types";
 import { LocalDictationEvent } from "../../repos/insights.repo";
+import { AiVoiceProfile } from "./profile.types";
 
 export type UsageCategory = "AI prompts" | "Coding" | "Writing" | "Other";
 export type HeatmapCell = { date: string; words: number; level: number };
@@ -583,4 +584,220 @@ export const computeLeaderboard = (
     .slice(0, 5);
 
   return { records, topApps };
+};
+
+export const templatedProfile = (base: VoiceProfile): AiVoiceProfile => ({
+  name: base.name,
+  identity: base.description,
+  traits: [],
+  topics: [],
+  style: "",
+  quirks: [],
+  generated: false,
+});
+
+export const sampleTranscripts = (
+  transcriptions: Transcription[],
+  limit = 40,
+): string[] =>
+  activeTranscriptions(transcriptions)
+    .slice()
+    .sort((a, b) => dayjs(b.createdAt).valueOf() - dayjs(a.createdAt).valueOf())
+    .slice(0, limit)
+    .map((t) => t.transcript.trim())
+    .filter(Boolean);
+
+const FILLERS = new Set([
+  "um",
+  "uh",
+  "like",
+  "basically",
+  "literally",
+  "actually",
+  "honestly",
+  "just",
+  "really",
+  "kinda",
+  "sorta",
+  "yeah",
+]);
+
+export type WordAnalysis = {
+  vocabularySize: number;
+  fillerRate: number;
+  avgSentenceLength: number;
+  questionRatio: number;
+  topPhrases: { phrase: string; count: number }[];
+};
+
+export const computeWordAnalysis = (
+  transcriptions: Transcription[],
+): WordAnalysis => {
+  const active = activeTranscriptions(transcriptions);
+  const allText = active.map((t) => t.transcript).join(" \n ");
+  const words = tokenize(allText);
+  const total = Math.max(1, words.length);
+  const vocab = new Set(
+    words.filter((w) => w.length >= 3 && !STOPWORDS.has(w)),
+  );
+  let fillers = 0;
+  for (const w of words) if (FILLERS.has(w)) fillers += 1;
+
+  const sentences = allText
+    .split(/[.!?]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const questions = active.reduce(
+    (n, t) => n + (t.transcript.match(/\?/g)?.length ?? 0),
+    0,
+  );
+
+  const counts = new Map<string, number>();
+  for (let size = 3; size >= 2; size--) {
+    for (let i = 0; i + size <= words.length; i++) {
+      const gram = words.slice(i, i + size);
+      if (STOPWORDS.has(gram[0]) || STOPWORDS.has(gram[size - 1])) continue;
+      const key = gram.join(" ");
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  const topPhrases = Array.from(counts.entries())
+    .filter(([, c]) => c >= 2)
+    .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
+    .slice(0, 6)
+    .map(([phrase, count]) => ({ phrase, count }));
+
+  return {
+    vocabularySize: vocab.size,
+    fillerRate: Math.round((fillers / total) * 1000) / 10,
+    avgSentenceLength: sentences.length
+      ? Math.round(total / sentences.length)
+      : 0,
+    questionRatio: sentences.length
+      ? Math.round((questions / sentences.length) * 100)
+      : 0,
+    topPhrases,
+  };
+};
+
+export type UsageExtras = {
+  hourHistogram: number[];
+  perApp: { app: string; words: number; count: number; avgLength: number }[];
+  bestDay: { day: string; words: number } | null;
+  dailyTrend: { date: string; words: number }[];
+};
+
+export const computeUsageExtras = (
+  events: LocalDictationEvent[],
+  transcriptions: Transcription[],
+): UsageExtras => {
+  const active = activeTranscriptions(transcriptions);
+  const hourHistogram: number[] = Array.from({ length: 24 }, () => 0);
+  const byDay = new Map<string, number>();
+  for (const t of active) {
+    hourHistogram[dayjs(t.createdAt).hour()] += transcriptWords(t);
+    const k = dayjs(t.createdAt).format("YYYY-MM-DD");
+    byDay.set(k, (byDay.get(k) ?? 0) + transcriptWords(t));
+  }
+
+  const perAppMap = new Map<string, { words: number; count: number }>();
+  for (const e of events) {
+    if (!e.appName) continue;
+    const x = perAppMap.get(e.appName) ?? { words: 0, count: 0 };
+    x.words += e.wordCount;
+    x.count += 1;
+    perAppMap.set(e.appName, x);
+  }
+  const perApp = Array.from(perAppMap.entries())
+    .map(([app, v]) => ({
+      app,
+      words: v.words,
+      count: v.count,
+      avgLength: v.count ? Math.round(v.words / v.count) : 0,
+    }))
+    .sort((a, b) => b.words - a.words)
+    .slice(0, 6);
+
+  let bestDay: { day: string; words: number } | null = null;
+  for (const [day, words] of byDay.entries()) {
+    if (!bestDay || words > bestDay.words) bestDay = { day, words };
+  }
+
+  const dailyTrend: { date: string; words: number }[] = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = dayjs().subtract(i, "day").format("YYYY-MM-DD");
+    dailyTrend.push({ date: d, words: byDay.get(d) ?? 0 });
+  }
+
+  return { hourHistogram, perApp, bestDay, dailyTrend };
+};
+
+export type Achievement = {
+  key: string;
+  label: string;
+  description: string;
+  unlocked: boolean;
+  progress: number;
+};
+
+export const computeAchievements = (
+  events: LocalDictationEvent[],
+  transcriptions: Transcription[],
+): Achievement[] => {
+  const usage = computeUsage(events, transcriptions);
+  const active = activeTranscriptions(transcriptions);
+  const byDay = new Map<string, number>();
+  for (const t of active) {
+    const k = dayjs(t.createdAt).format("YYYY-MM-DD");
+    byDay.set(k, (byDay.get(k) ?? 0) + transcriptWords(t));
+  }
+  const mostInDay = Math.max(0, ...Array.from(byDay.values()));
+
+  const goal = (
+    key: string,
+    label: string,
+    description: string,
+    value: number,
+    target: number,
+  ): Achievement => ({
+    key,
+    label,
+    description,
+    unlocked: value >= target,
+    progress: Math.max(0, Math.min(1, value / target)),
+  });
+
+  return [
+    goal("w1k", "First 1,000", "Dictate 1,000 words", usage.totalWords, 1000),
+    goal(
+      "w10k",
+      "First 10k",
+      "Reach your first 10,000-word milestone",
+      usage.totalWords,
+      10000,
+    ),
+    goal(
+      "w50k",
+      "Half a novel",
+      "Dictate 50,000 words",
+      usage.totalWords,
+      50000,
+    ),
+    goal(
+      "novel",
+      "Novelist",
+      "Dictate a full novel (90,000 words)",
+      usage.totalWords,
+      AVG_NOVEL_WORDS,
+    ),
+    goal(
+      "s7",
+      "Week streak",
+      "Dictate 7 days in a row",
+      usage.longestStreak,
+      7,
+    ),
+    goal("s30", "Monthly habit", "30-day streak", usage.longestStreak, 30),
+    goal("bigday", "Big day", "1,000 words in a single day", mostInDay, 1000),
+  ];
 };
