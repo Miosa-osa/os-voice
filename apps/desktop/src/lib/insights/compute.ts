@@ -839,3 +839,162 @@ export const computeAchievements = (
     goal("bigday", "Big day", "1,000 words in a single day", mostInDay, 1000),
   ];
 };
+
+export type Momentum = {
+  wordsToday: number;
+  wpmToday: number;
+  currentStreak: number;
+  paceVsAvgPct: number;
+  weekProjection: number;
+};
+
+export const computeMomentum = (
+  events: LocalDictationEvent[],
+  transcriptions: Transcription[],
+): Momentum => {
+  const active = activeTranscriptions(transcriptions);
+  const today = dayjs().format("YYYY-MM-DD");
+  const weekStart = dayjs().startOf("week");
+  let wordsToday = 0;
+  let audioToday = 0;
+  let wordsThisWeek = 0;
+  for (const t of active) {
+    const d = dayjs(t.createdAt);
+    const w = transcriptWords(t);
+    if (d.format("YYYY-MM-DD") === today) {
+      wordsToday += w;
+      audioToday += audioMs(t);
+    }
+    if (!d.isBefore(weekStart)) wordsThisWeek += w;
+  }
+  const usage = computeUsage(events, transcriptions);
+  const minsToday = audioToday / 60000;
+  const wpmToday = minsToday > 0 ? Math.round(wordsToday / minsToday) : 0;
+  const paceVsAvgPct =
+    usage.wpm > 0 && wpmToday > 0
+      ? Math.round(((wpmToday - usage.wpm) / usage.wpm) * 100)
+      : 0;
+  const dayOfWeek = Math.max(1, dayjs().diff(weekStart, "day") + 1);
+  const weekProjection = Math.round((wordsThisWeek / dayOfWeek) * 7);
+  return {
+    wordsToday,
+    wpmToday,
+    currentStreak: usage.currentStreak,
+    paceVsAvgPct,
+    weekProjection,
+  };
+};
+
+export type TrendPoint = { label: string; value: number };
+export type Trends = {
+  wpmWeekly: TrendPoint[];
+  vocabGrowth: TrendPoint[];
+  fillerWeekly: TrendPoint[];
+  wpmDeltaPct: number;
+};
+
+export const computeTrends = (transcriptions: Transcription[]): Trends => {
+  const active = activeTranscriptions(transcriptions);
+  const WEEKS = 8;
+  const now = dayjs();
+  const wpmWeekly: TrendPoint[] = [];
+  const fillerWeekly: TrendPoint[] = [];
+  const vocabGrowth: TrendPoint[] = [];
+  const vocab = new Set<string>();
+
+  for (let i = WEEKS - 1; i >= 0; i--) {
+    const start = now.subtract(i, "week").startOf("week");
+    const end = start.add(1, "week");
+    let words = 0;
+    let ms = 0;
+    let fillers = 0;
+    let tokens = 0;
+    for (const t of active) {
+      const d = dayjs(t.createdAt);
+      if (d.isBefore(start) || !d.isBefore(end)) continue;
+      const ws = tokenize(t.transcript);
+      words += ws.length;
+      ms += audioMs(t);
+      tokens += ws.length;
+      for (const w of ws) {
+        if (FILLERS.has(w)) fillers += 1;
+        if (w.length >= 3 && !STOPWORDS.has(w)) vocab.add(w);
+      }
+    }
+    const mins = ms / 60000;
+    const label = start.format("MMM D");
+    wpmWeekly.push({ label, value: mins > 0 ? Math.round(words / mins) : 0 });
+    fillerWeekly.push({
+      label,
+      value: tokens > 0 ? Math.round((fillers / tokens) * 1000) / 10 : 0,
+    });
+    vocabGrowth.push({ label, value: vocab.size });
+  }
+
+  const last = wpmWeekly[wpmWeekly.length - 1]?.value ?? 0;
+  const prev = wpmWeekly[wpmWeekly.length - 2]?.value ?? 0;
+  const wpmDeltaPct = prev > 0 ? Math.round(((last - prev) / prev) * 100) : 0;
+  return { wpmWeekly, vocabGrowth, fillerWeekly, wpmDeltaPct };
+};
+
+export type Predictions = {
+  nextMilestone: number | null;
+  daysToNextMilestone: number | null;
+  projectedMonthWords: number;
+  dailyRate: number;
+};
+
+export const computePredictions = (
+  events: LocalDictationEvent[],
+  transcriptions: Transcription[],
+): Predictions => {
+  const active = activeTranscriptions(transcriptions);
+  const usage = computeUsage(events, transcriptions);
+  const byDay = new Map<string, number>();
+  for (const t of active) {
+    const k = dayjs(t.createdAt).format("YYYY-MM-DD");
+    byDay.set(k, (byDay.get(k) ?? 0) + transcriptWords(t));
+  }
+  let recent = 0;
+  for (let i = 0; i < 14; i++) {
+    const k = dayjs().subtract(i, "day").format("YYYY-MM-DD");
+    recent += byDay.get(k) ?? 0;
+  }
+  const dailyRate = Math.round(recent / 14);
+  const next = nextMilestoneWords(usage.totalWords);
+  const daysToNextMilestone =
+    next !== null && dailyRate > 0
+      ? Math.ceil((next - usage.totalWords) / dailyRate)
+      : null;
+  const dayOfMonth = dayjs().date();
+  const daysInMonth = dayjs().daysInMonth();
+  const projectedMonthWords =
+    dayOfMonth > 0
+      ? Math.round((usage.wordsThisMonth / dayOfMonth) * daysInMonth)
+      : usage.wordsThisMonth;
+  return {
+    nextMilestone: next,
+    daysToNextMilestone,
+    projectedMonthWords,
+    dailyRate,
+  };
+};
+
+export type CloudWord = { word: string; count: number };
+
+export const computeWordCloud = (
+  transcriptions: Transcription[],
+  max = 40,
+): CloudWord[] => {
+  const counts = new Map<string, number>();
+  for (const t of activeTranscriptions(transcriptions)) {
+    for (const w of tokenize(t.transcript)) {
+      if (w.length < 3 || STOPWORDS.has(w)) continue;
+      counts.set(w, (counts.get(w) ?? 0) + 1);
+    }
+  }
+  return Array.from(counts.entries())
+    .map(([word, count]) => ({ word, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, max);
+};

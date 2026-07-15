@@ -5,6 +5,9 @@ export type AiVoiceProfile = {
   topics: string[];
   style: string;
   quirks: string[];
+  recentActivity?: string;
+  tone?: string;
+  whatsChanged?: string;
   generated: boolean;
 };
 

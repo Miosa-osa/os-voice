@@ -13,6 +13,7 @@ import {
   PROFILE_UNLOCK_WORDS,
   sampleTranscripts,
   templatedProfile,
+  WORD_ANALYSIS_UNLOCK_WORDS,
 } from "../lib/insights/compute";
 import {
   buildProfileSystemPrompt,
@@ -54,6 +55,18 @@ export const loadInsights = async (): Promise<void> => {
   }
 };
 
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Debounced refresh so the Insights dashboard updates live as the user dictates,
+// without hammering the DB on every single event.
+export const scheduleInsightsRefresh = (): void => {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    void loadInsights();
+  }, 1500);
+};
+
 export const generateVoiceProfile = async (opts?: {
   force?: boolean;
 }): Promise<void> => {
@@ -64,15 +77,31 @@ export const generateVoiceProfile = async (opts?: {
   const usage = computeUsage(events, transcriptions);
   if (usage.totalWords < PROFILE_UNLOCK_WORDS) return;
   const milestone = milestoneFor(usage.totalWords);
+  const history = state.local.voiceProfiles ?? [];
+  const latest = history.slice().sort((a, b) => b.createdAt - a.createdAt)[0];
+  const existingForMilestone = history.find((p) => p.milestone === milestone);
 
-  const existing = (state.local.voiceProfiles ?? []).find(
-    (p) => p.milestone === milestone,
-  );
-  if (existing && !opts?.force) {
-    produceAppState((draft) => {
-      draft.insights.aiProfile = existing.profile;
-      draft.insights.aiProfileStatus = "success";
-    });
+  let shouldRegen = opts?.force === true;
+  if (!shouldRegen) {
+    if (!latest) {
+      shouldRegen = true;
+    } else if (milestone > latest.milestone) {
+      shouldRegen = true;
+    } else if (usage.totalWords < WORD_ANALYSIS_UNLOCK_WORDS) {
+      const ageMs = Date.now() - latest.createdAt;
+      const wordsSince = usage.totalWords - latest.totalWords;
+      if (ageMs > 24 * 60 * 60 * 1000 || wordsSince >= 500) shouldRegen = true;
+    }
+  }
+
+  if (!shouldRegen) {
+    const cached = existingForMilestone?.profile ?? latest?.profile;
+    if (cached) {
+      produceAppState((draft) => {
+        draft.insights.aiProfile = cached;
+        draft.insights.aiProfileStatus = "success";
+      });
+    }
     return;
   }
 
@@ -90,7 +119,13 @@ export const generateVoiceProfile = async (opts?: {
     if (!gen.repo) throw new Error("no generation model configured");
     const output = await gen.repo.generateText({
       system: buildProfileSystemPrompt(),
-      prompt: buildProfileUserPrompt({ usage, profile: base, words, samples }),
+      prompt: buildProfileUserPrompt({
+        usage,
+        profile: base,
+        words,
+        samples,
+        previousIdentity: latest?.profile.identity ?? null,
+      }),
     });
     profile = parseProfileResponse(output.text) ?? templatedProfile(base);
   } catch (error) {
@@ -145,6 +180,7 @@ export const recordDictationEvent = async (
     produceAppState((draft) => {
       draft.insights.events = [event, ...draft.insights.events];
     });
+    scheduleInsightsRefresh();
   } catch (error) {
     getLogger().error(`Failed to record dictation event: ${error}`);
   }

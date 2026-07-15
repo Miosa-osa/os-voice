@@ -22,6 +22,7 @@ import {
   computeUsage,
   computeVoiceProfile,
   computeWordAnalysis,
+  computeWordCloud,
   milestoneFor,
   nextMilestoneWords,
 } from "../../lib/insights/compute";
@@ -30,6 +31,7 @@ import { useAppStore } from "../../store";
 import { InsightsEmpty } from "./InsightsEmpty";
 import { StatCard } from "./StatCard";
 import { useInsightsSources } from "./useInsightsData";
+import { WordCloud } from "./WordCloud";
 
 const ChipRow = ({ items }: { items: string[] }) =>
   items.length === 0 ? null : (
@@ -104,6 +106,20 @@ export const YourVoiceTab = () => {
   const words = useMemo(
     () => computeWordAnalysis(transcriptions),
     [transcriptions],
+  );
+  const cloud = useMemo(
+    () => computeWordCloud(transcriptions),
+    [transcriptions],
+  );
+  const recentTerms = useMemo(
+    () =>
+      terms
+        .slice()
+        .sort(
+          (a, b) => dayjs(b.createdAt).valueOf() - dayjs(a.createdAt).valueOf(),
+        )
+        .slice(0, 12),
+    [terms],
   );
 
   useEffect(() => {
@@ -224,6 +240,35 @@ export const YourVoiceTab = () => {
             </Typography>
           )}
 
+          {aiProfile?.recentActivity && (
+            <Typography variant="body2" color="textSecondary">
+              {aiProfile.recentActivity}
+            </Typography>
+          )}
+
+          {(aiProfile?.tone || aiProfile?.whatsChanged) && (
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              {aiProfile?.tone && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={intl.formatMessage(
+                    { defaultMessage: "Tone: {t}" },
+                    { t: aiProfile.tone },
+                  )}
+                />
+              )}
+              {aiProfile?.whatsChanged && (
+                <Chip
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                  label={aiProfile.whatsChanged}
+                />
+              )}
+            </Stack>
+          )}
+
           <Typography variant="caption" color="textSecondary">
             {wordsToNext === null ? (
               <FormattedMessage defaultMessage="You've reached the top milestone — your profile keeps refining." />
@@ -333,6 +378,37 @@ export const YourVoiceTab = () => {
           />
         </Stack>
       </Section>
+
+      {cloud.length > 0 && (
+        <Section title={<FormattedMessage defaultMessage="Your word cloud" />}>
+          <WordCloud words={cloud} />
+        </Section>
+      )}
+
+      {recentTerms.length > 0 && (
+        <Section
+          title={<FormattedMessage defaultMessage="Recently learned" />}
+          description={
+            <FormattedMessage defaultMessage="Words OS Voice has picked up from your corrections and dictionary." />
+          }
+        >
+          <Stack spacing={1}>
+            {recentTerms.map((t) => (
+              <Stack
+                key={t.id}
+                direction="row"
+                justifyContent="space-between"
+                alignItems="baseline"
+              >
+                <Typography fontWeight={600}>{t.destinationValue}</Typography>
+                <Typography variant="caption" color="textSecondary">
+                  {dayjs(t.createdAt).format("MMM D")}
+                </Typography>
+              </Stack>
+            ))}
+          </Stack>
+        </Section>
+      )}
 
       {history.length > 0 && (
         <Section

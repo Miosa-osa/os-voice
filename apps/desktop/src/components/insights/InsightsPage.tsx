@@ -16,6 +16,8 @@ export default function InsightsPage() {
 
   useEffect(() => {
     void loadInsights();
+    const interval = setInterval(() => void loadInsights(), 20000);
+    return () => clearInterval(interval);
   }, []);
 
   const setTab = (tab: InsightsTab) =>

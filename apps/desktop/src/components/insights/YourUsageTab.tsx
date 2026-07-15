@@ -5,12 +5,16 @@ import { FormattedMessage } from "react-intl";
 import { Section } from "../common/Section";
 import {
   booksComparison,
+  computeMomentum,
+  computePredictions,
+  computeTrends,
   computeUsage,
   computeUsageExtras,
 } from "../../lib/insights/compute";
 import { ContributionHeatmap } from "./ContributionHeatmap";
 import { InsightsEmpty } from "./InsightsEmpty";
 import { MiniBars } from "./MiniBars";
+import { MiniLine } from "./MiniLine";
 import { StatCard } from "./StatCard";
 import { useInsightsSources } from "./useInsightsData";
 
@@ -34,6 +38,15 @@ export const YourUsageTab = () => {
     () => booksComparison(usage.totalWords),
     [usage.totalWords],
   );
+  const momentum = useMemo(
+    () => computeMomentum(events, transcriptions),
+    [events, transcriptions],
+  );
+  const trends = useMemo(() => computeTrends(transcriptions), [transcriptions]);
+  const predictions = useMemo(
+    () => computePredictions(events, transcriptions),
+    [events, transcriptions],
+  );
 
   if (usage.totalDictations === 0) {
     return <InsightsEmpty />;
@@ -41,6 +54,40 @@ export const YourUsageTab = () => {
 
   return (
     <Stack spacing={3}>
+      <Section title={<FormattedMessage defaultMessage="Today" />}>
+        <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+          <StatCard
+            value={momentum.wordsToday.toLocaleString()}
+            label={<FormattedMessage defaultMessage="Words today" />}
+          />
+          <StatCard
+            value={momentum.wpmToday || "—"}
+            label={<FormattedMessage defaultMessage="WPM today" />}
+            hint={
+              momentum.paceVsAvgPct !== 0 ? (
+                <FormattedMessage
+                  defaultMessage="{pct}% vs your average"
+                  values={{
+                    pct:
+                      momentum.paceVsAvgPct > 0
+                        ? `+${momentum.paceVsAvgPct}`
+                        : momentum.paceVsAvgPct,
+                  }}
+                />
+              ) : undefined
+            }
+          />
+          <StatCard
+            value={momentum.currentStreak}
+            label={<FormattedMessage defaultMessage="Day streak" />}
+          />
+          <StatCard
+            value={momentum.weekProjection.toLocaleString()}
+            label={<FormattedMessage defaultMessage="On pace this week" />}
+          />
+        </Stack>
+      </Section>
+
       <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
         <StatCard
           value={usage.wpm}
@@ -100,6 +147,69 @@ export const YourUsageTab = () => {
           data={extras.dailyTrend.map((d) => d.words)}
           labels={extras.dailyTrend.map((d) => dayjs(d.date).format("MMM D"))}
         />
+      </Section>
+
+      <Section title={<FormattedMessage defaultMessage="Trends" />}>
+        <Stack spacing={2.5}>
+          <Stack spacing={0.5}>
+            <Typography variant="body2" color="textSecondary">
+              <FormattedMessage defaultMessage="Speaking pace (weekly)" />
+              {trends.wpmDeltaPct !== 0 && (
+                <FormattedMessage
+                  defaultMessage=" · {pct}% vs last week"
+                  values={{
+                    pct:
+                      trends.wpmDeltaPct > 0
+                        ? `+${trends.wpmDeltaPct}`
+                        : trends.wpmDeltaPct,
+                  }}
+                />
+              )}
+            </Typography>
+            <MiniLine data={trends.wpmWeekly} />
+          </Stack>
+          <Stack spacing={0.5}>
+            <Typography variant="body2" color="textSecondary">
+              <FormattedMessage defaultMessage="Vocabulary growth" />
+            </Typography>
+            <MiniLine data={trends.vocabGrowth} />
+          </Stack>
+          <Stack spacing={0.5}>
+            <Typography variant="body2" color="textSecondary">
+              <FormattedMessage defaultMessage="Filler words per 100 (weekly)" />
+            </Typography>
+            <MiniBars
+              data={trends.fillerWeekly.map((p) => p.value)}
+              labels={trends.fillerWeekly.map((p) => p.label)}
+            />
+          </Stack>
+        </Stack>
+      </Section>
+
+      <Section title={<FormattedMessage defaultMessage="Looking ahead" />}>
+        <Stack spacing={1}>
+          {predictions.nextMilestone !== null &&
+            predictions.daysToNextMilestone !== null && (
+              <Typography variant="body2" color="textSecondary">
+                <FormattedMessage
+                  defaultMessage="At your current pace, you'll hit {milestone} words in about {days} days."
+                  values={{
+                    milestone: predictions.nextMilestone.toLocaleString(),
+                    days: predictions.daysToNextMilestone,
+                  }}
+                />
+              </Typography>
+            )}
+          <Typography variant="body2" color="textSecondary">
+            <FormattedMessage
+              defaultMessage="On track for {words} words this month ({rate}/day lately)."
+              values={{
+                words: predictions.projectedMonthWords.toLocaleString(),
+                rate: predictions.dailyRate.toLocaleString(),
+              }}
+            />
+          </Typography>
+        </Stack>
       </Section>
 
       {extras.perApp.length > 0 && (
