@@ -998,3 +998,108 @@ export const computeWordCloud = (
     .sort((a, b) => b.count - a.count)
     .slice(0, max);
 };
+
+const STREAK_TARGETS = [7, 30, 100, 365];
+
+export type StreakNudge = {
+  streak: number;
+  remaining: number;
+  target: number;
+} | null;
+
+const streakNudge = (streak: number): StreakNudge => {
+  if (streak <= 0) return null;
+  const target = STREAK_TARGETS.find((t) => streak < t);
+  if (!target) return null;
+  return { streak, remaining: target - streak, target };
+};
+
+export type DailyActivitySummary = {
+  currentStreak: number;
+  longestStreak: number;
+  activeDaysThisYear: number;
+  activeDaysTotal: number;
+  mostActiveDay: { date: string; words: number } | null;
+  yearWords: number;
+  nudge: StreakNudge;
+};
+
+export const computeDailyActivitySummary = (
+  transcriptions: Transcription[],
+): DailyActivitySummary => {
+  const active = activeTranscriptions(transcriptions);
+  const byDay = new Map<string, number>();
+  for (const t of active) {
+    const key = dayjs(t.createdAt).format("YYYY-MM-DD");
+    byDay.set(key, (byDay.get(key) ?? 0) + transcriptWords(t));
+  }
+
+  const year = dayjs().year();
+  let activeDaysThisYear = 0;
+  let yearWords = 0;
+  let mostActiveDay: { date: string; words: number } | null = null;
+  for (const [key, words] of byDay.entries()) {
+    if (words <= 0) continue;
+    if (dayjs(key).year() === year) {
+      activeDaysThisYear += 1;
+      yearWords += words;
+    }
+    if (!mostActiveDay || words > mostActiveDay.words) {
+      mostActiveDay = { date: key, words };
+    }
+  }
+
+  const streaks = computeStreaks(active);
+  return {
+    currentStreak: streaks.current,
+    longestStreak: streaks.longest,
+    activeDaysThisYear,
+    activeDaysTotal: byDay.size,
+    mostActiveDay,
+    yearWords,
+    nudge: streakNudge(streaks.current),
+  };
+};
+
+export type DayDetail = {
+  date: string;
+  words: number;
+  wpm: number;
+  minutes: number;
+  dictations: number;
+  topApp: string | null;
+};
+
+export const computeDayDetail = (
+  events: LocalDictationEvent[],
+  transcriptions: Transcription[],
+  dateKey: string,
+): DayDetail => {
+  const onDay = activeTranscriptions(transcriptions).filter(
+    (t) => dayjs(t.createdAt).format("YYYY-MM-DD") === dateKey,
+  );
+  let words = 0;
+  let ms = 0;
+  for (const t of onDay) {
+    words += transcriptWords(t);
+    ms += audioMs(t);
+  }
+  const minutes = ms / 60000;
+  const wpm = minutes > 0 ? Math.round(words / minutes) : 0;
+
+  const appWords = new Map<string, number>();
+  for (const e of events) {
+    if (!e.appName) continue;
+    if (dayjs(e.timestamp).format("YYYY-MM-DD") !== dateKey) continue;
+    appWords.set(e.appName, (appWords.get(e.appName) ?? 0) + e.wordCount);
+  }
+
+  return {
+    date: dateKey,
+    words,
+    wpm,
+    minutes: Math.round(minutes),
+    dictations: onDay.length,
+    topApp: topEntry(appWords),
+  };
+};
