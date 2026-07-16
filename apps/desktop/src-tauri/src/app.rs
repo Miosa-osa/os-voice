@@ -126,6 +126,14 @@ pub fn build() -> tauri::Builder<tauri::Wry> {
 
             log::info!("Starting application setup...");
 
+            // Kill any transcription-engine sidecars orphaned by a previous
+            // crash or hard kill, before this instance spawns its own — they
+            // otherwise pile up and exhaust (V)RAM.
+            let reaped = crate::system::sidecar_reaper::reap_orphan_transcription_sidecars();
+            if reaped > 0 {
+                log::info!("Reaped {reaped} orphaned transcription sidecar(s)");
+            }
+
             // Purge old log files, keeping the latest 10
             crate::system::diagnostics::purge_old_logs(app.handle());
 
