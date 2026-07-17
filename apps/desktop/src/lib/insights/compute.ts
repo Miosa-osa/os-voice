@@ -539,7 +539,7 @@ export const learnTermsFromEdit = (
   const n = a.length;
   const m = b.length;
   const dp: number[][] = Array.from({ length: n + 1 }, () =>
-    Array.from<number>({ length: m + 1 }, () => 0),
+    Array.from({ length: m + 1 }, () => 0),
   );
   for (let i = n - 1; i >= 0; i -= 1) {
     for (let j = m - 1; j >= 0; j -= 1) {
