@@ -209,8 +209,12 @@ const buildHeatmap = (transcriptions: Transcription[]): HeatmapCell[] => {
   }
   const max = Math.max(1, ...Array.from(byDay.values()));
   const cells: HeatmapCell[] = [];
-  const start = dayjs().subtract(HEATMAP_DAYS - 1, "day");
-  for (let i = 0; i < HEATMAP_DAYS; i++) {
+  // Back the window up to the Sunday on/before it so the flat cell array chunks
+  // into Sun→Sat weeks and the weekday row labels (Mon/Wed/Fri) line up.
+  const rawStart = dayjs().subtract(HEATMAP_DAYS - 1, "day");
+  const start = rawStart.subtract(rawStart.day(), "day");
+  const totalDays = HEATMAP_DAYS + rawStart.day();
+  for (let i = 0; i < totalDays; i++) {
     const day = start.add(i, "day");
     const key = day.format("YYYY-MM-DD");
     const words = byDay.get(key) ?? 0;
@@ -372,7 +376,9 @@ const mostCorrectedWord = (allText: string, terms: Term[]): string | null => {
   let best: string | null = null;
   let bestCount = 0;
   for (const term of terms) {
-    const source = term.sourceValue.trim().toLowerCase();
+    // Normalize the source through the same tokenizer as the text, so hyphenated
+    // terms (e.g. "well-known" → "well known") can still be matched.
+    const source = tokenize(term.sourceValue).join(" ");
     if (!source) continue;
     const matches = lower.split(` ${source} `).length - 1;
     if (matches > bestCount) {
@@ -524,12 +530,49 @@ export const learnTermsFromEdit = (
   const wordRe = /[A-Za-z][A-Za-z'’-]*/g;
   const a = oldText.match(wordRe) ?? [];
   const b = newText.match(wordRe) ?? [];
-  if (a.length === 0 || a.length !== b.length) return [];
+  if (a.length === 0 || b.length === 0) return [];
+
+  // Longest common subsequence of the two word arrays (case-insensitive), so we
+  // only learn genuine single-word corrections — not garbage from rephrases that
+  // happen to keep the same word count.
+  const eq = (x: string, y: string) => x.toLowerCase() === y.toLowerCase();
+  const n = a.length;
+  const m = b.length;
+  const dp: number[][] = Array.from({ length: n + 1 }, () =>
+    Array.from<number>({ length: m + 1 }, () => 0),
+  );
+  for (let i = n - 1; i >= 0; i -= 1) {
+    for (let j = m - 1; j >= 0; j -= 1) {
+      dp[i][j] = eq(a[i], b[j])
+        ? dp[i + 1][j + 1] + 1
+        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const anchors: [number, number][] = [];
+  let ai = 0;
+  let bj = 0;
+  while (ai < n && bj < m) {
+    if (eq(a[ai], b[bj])) {
+      anchors.push([ai, bj]);
+      ai += 1;
+      bj += 1;
+    } else if (dp[ai + 1][bj] >= dp[ai][bj + 1]) {
+      ai += 1;
+    } else {
+      bj += 1;
+    }
+  }
+
+  // A clean substitution is exactly one differing word on each side, flanked by
+  // matching anchor words on both sides (unchanged context).
   const out: { source: string; destination: string }[] = [];
   const seen = new Set<string>();
-  for (let i = 0; i < a.length && out.length < max; i += 1) {
-    const source = a[i];
-    const destination = b[i];
+  for (let k = 0; k + 1 < anchors.length && out.length < max; k += 1) {
+    const [pi, pj] = anchors[k];
+    const [ni, nj] = anchors[k + 1];
+    if (ni - pi !== 2 || nj - pj !== 2) continue;
+    const source = a[pi + 1];
+    const destination = b[pj + 1];
     const key = source.toLowerCase();
     if (source.length < 2 || destination.length < 2) continue;
     if (key === destination.toLowerCase()) continue;

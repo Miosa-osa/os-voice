@@ -1,7 +1,7 @@
 use crate::platform::keyboard::{
-    debug_keys_enabled, key_raw_code, key_to_label, run_listen_loop, send_event_to_tcp,
-    setup_listener_process, update_grab_hotkey_state, GrabDecision, GrabHotkeyState,
-    KeyboardEventPayload, WireEventKind,
+    button_to_label, debug_keys_enabled, key_raw_code, key_to_label, run_listen_loop,
+    send_event_to_tcp, setup_listener_process, update_grab_hotkey_state, GrabDecision,
+    GrabHotkeyState, KeyboardEventPayload, WireEventKind,
 };
 use rdev::{Event, EventType};
 use std::cell::RefCell;
@@ -35,6 +35,30 @@ pub fn run_listener_process() -> Result<(), String> {
             pressed_platform_codes: HashMap::new(),
         });
         move |event| -> Option<Event> {
+            // Mouse buttons: forward to the app + keep grab state consistent, but ALWAYS
+            // pass the click through (never suppress) so normal clicking keeps working.
+            if let EventType::ButtonPress(button) | EventType::ButtonRelease(button) =
+                event.event_type
+            {
+                let is_press = matches!(event.event_type, EventType::ButtonPress(_));
+                let label = button_to_label(button);
+                let payload = KeyboardEventPayload {
+                    kind: if is_press {
+                        WireEventKind::Press
+                    } else {
+                        WireEventKind::Release
+                    },
+                    key_label: label.clone(),
+                    raw_code: None,
+                    scan_code: 1,
+                };
+                send_event_to_tcp(&writer, &payload);
+                let mut s = state.borrow_mut();
+                let current_combos = combos.lock().map(|g| g.clone()).unwrap_or_default();
+                let _ = update_grab_hotkey_state(&mut s.hotkeys, &label, is_press, &current_combos);
+                return Some(event);
+            }
+
             let (key, is_press) = match event.event_type {
                 EventType::KeyPress(key) => (key, true),
                 EventType::KeyRelease(key) => (key, false),

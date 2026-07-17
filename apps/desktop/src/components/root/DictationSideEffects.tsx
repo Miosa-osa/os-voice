@@ -350,7 +350,7 @@ export const DictationSideEffects = () => {
           a11yInfo,
         });
       } catch (error) {
-        void fallbackToCpuIfGpuFailed();
+        void fallbackToCpuIfGpuFailed(error);
         throw error;
       }
     })();

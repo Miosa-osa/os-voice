@@ -27,10 +27,32 @@ pub fn reap_orphan_transcription_sidecars() -> usize {
             .unwrap_or(false)
             || process.name().to_string_lossy().starts_with("rust-transcript");
 
-        if is_sidecar && process.kill() {
+        // Only reap sidecars that are actually ORPHANED — parent gone, or
+        // reparented to an OS reaper (pid<=1 / init / systemd / launchd).
+        // A sidecar with a live, ordinary parent (e.g. one spawned by
+        // `cargo test` or another running app) is owned and must be left alone.
+        if is_sidecar && is_orphaned(&sys, process.parent()) && process.kill() {
             killed += 1;
         }
     }
 
     killed
+}
+
+fn is_orphaned(sys: &System, parent: Option<sysinfo::Pid>) -> bool {
+    match parent {
+        None => true,
+        Some(ppid) => {
+            if ppid.as_u32() <= 1 {
+                return true;
+            }
+            match sys.process(ppid) {
+                None => true,
+                Some(parent_proc) => {
+                    let name = parent_proc.name().to_string_lossy().to_ascii_lowercase();
+                    name.starts_with("systemd") || name == "init" || name == "launchd"
+                }
+            }
+        }
+    }
 }

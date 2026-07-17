@@ -105,6 +105,13 @@ export const generateVoiceProfile = async (opts?: {
     return;
   }
 
+  // Reentrancy guard: the live-refresh effect re-fires ~every 1.5s while
+  // dictating, so bail if a generation is already in flight — otherwise
+  // overlapping LLM calls can let a slower/staler response clobber a fresher one.
+  if (!opts?.force && getAppState().insights.aiProfileStatus === "loading") {
+    return;
+  }
+
   produceAppState((draft) => {
     draft.insights.aiProfileStatus = "loading";
   });

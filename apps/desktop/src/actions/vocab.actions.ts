@@ -21,8 +21,13 @@ export const refreshLearnedVocabulary = async (): Promise<void> => {
       if (term?.sourceValue) excluded.add(term.sourceValue);
       if (term?.destinationValue) excluded.add(term.destinationValue);
     }
+    // learnVocabulary excludes per-token, so add each word of a multi-word name.
     const name = getMyUser(state)?.name;
-    if (name) excluded.add(name);
+    if (name) {
+      for (const part of name.split(/\s+/)) {
+        if (part) excluded.add(part);
+      }
+    }
 
     const learnedWords = learnVocabulary(transcripts, { excluded });
     produceAppState((draft) => {

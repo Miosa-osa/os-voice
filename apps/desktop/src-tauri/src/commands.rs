@@ -506,14 +506,24 @@ pub struct DeviceCapability {
 #[tauri::command]
 #[specta::specta]
 pub fn get_device_capability() -> DeviceCapability {
-    let usable = crate::system::gpu::list_available_gpus().into_iter().find(|g| {
-        let name = g.name.to_lowercase();
-        matches!(g.device_type.as_str(), "DiscreteGpu" | "IntegratedGpu")
-            && !name.contains("llvmpipe")
-            && !name.contains("software")
-            && !name.contains("swiftshader")
-            && !name.contains("microsoft basic")
-    });
+    let candidates: Vec<_> = crate::system::gpu::list_available_gpus()
+        .into_iter()
+        .filter(|g| {
+            let name = g.name.to_lowercase();
+            matches!(g.device_type.as_str(), "DiscreteGpu" | "IntegratedGpu")
+                && !name.contains("llvmpipe")
+                && !name.contains("software")
+                && !name.contains("swiftshader")
+                && !name.contains("microsoft basic")
+        })
+        .collect();
+    // Prefer a discrete GPU over an integrated one when both are present, so
+    // gpu_name reflects the real dGPU on hybrid laptops.
+    let usable = candidates
+        .iter()
+        .find(|g| g.device_type == "DiscreteGpu")
+        .or_else(|| candidates.first())
+        .cloned();
 
     let cpu_cores = std::thread::available_parallelism()
         .map(|n| n.get() as u32)
