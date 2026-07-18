@@ -14,7 +14,6 @@ import {
   sampleTranscripts,
   templatedCoaching,
   templatedProfile,
-  WORD_ANALYSIS_UNLOCK_WORDS,
 } from "../lib/insights/compute";
 import {
   buildProfileSystemPrompt,
@@ -23,6 +22,7 @@ import {
 } from "../lib/insights/profile-prompt";
 import {
   AiVoiceProfile,
+  CoachingSnapshot,
   StoredVoiceProfile,
 } from "../lib/insights/profile.types";
 import { OllamaGenerateTextRepo } from "../repos/generate-text.repo";
@@ -90,16 +90,21 @@ export const generateVoiceProfile = async (opts?: {
   const latest = history.slice().sort((a, b) => b.createdAt - a.createdAt)[0];
   const existingForMilestone = history.find((p) => p.milestone === milestone);
 
+  // Living profile cadence: keep the profile fresh forever, not just up to the
+  // 10k-word "word analysis" unlock. Regenerate on a force, on the very first
+  // run, whenever a new milestone is crossed, or on a gentle time/word cadence
+  // (stale after a day, or enough new material since the last generation) —
+  // throttled by the reentrancy guard below so it never spams the LLM.
   let shouldRegen = opts?.force === true;
   if (!shouldRegen) {
     if (!latest) {
       shouldRegen = true;
     } else if (milestone > latest.milestone) {
       shouldRegen = true;
-    } else if (usage.totalWords < WORD_ANALYSIS_UNLOCK_WORDS) {
+    } else {
       const ageMs = Date.now() - latest.createdAt;
       const wordsSince = usage.totalWords - latest.totalWords;
-      if (ageMs > 24 * 60 * 60 * 1000 || wordsSince >= 500) shouldRegen = true;
+      if (ageMs > 24 * 60 * 60 * 1000 || wordsSince >= 750) shouldRegen = true;
     }
   }
 
@@ -127,14 +132,14 @@ export const generateVoiceProfile = async (opts?: {
 
   const base = computeVoiceProfile(events, transcriptions, terms, milestone);
   const words = computeWordAnalysis(transcriptions);
-  const samples = sampleTranscripts(transcriptions, 70);
+  const samples = sampleTranscripts(transcriptions, 100);
 
   let profile: AiVoiceProfile;
   const liteMode = state.local.liteMode === true;
   try {
     if (liteMode) {
       // Lite mode skips the LLM entirely to stay light on weak hardware.
-      profile = templatedProfile(base, words);
+      profile = templatedProfile(base, transcriptions, words);
     } else {
       const input = {
         system: buildProfileSystemPrompt(),
@@ -143,6 +148,7 @@ export const generateVoiceProfile = async (opts?: {
           profile: base,
           words,
           samples,
+          events,
           previousIdentity: latest?.profile.identity ?? null,
         }),
       };
@@ -161,7 +167,9 @@ export const generateVoiceProfile = async (opts?: {
         if (!gen.repo) throw new Error("no generation model configured");
         text = (await gen.repo.generateText(input)).text;
       }
-      profile = parseProfileResponse(text) ?? templatedProfile(base, words);
+      profile =
+        parseProfileResponse(text) ??
+        templatedProfile(base, transcriptions, words);
       // If the model omitted coaching, backfill a grounded offline version so the
       // Coaching card is never empty when we have enough signal.
       if (!profile.coaching) {
@@ -172,8 +180,16 @@ export const generateVoiceProfile = async (opts?: {
     getLogger().warning(
       `Voice profile generation fell back to template: ${error}`,
     );
-    profile = templatedProfile(base, words);
+    profile = templatedProfile(base, transcriptions, words);
   }
+
+  const stats: CoachingSnapshot = {
+    fillerRate: words.fillerRate,
+    avgSentenceLength: words.avgSentenceLength,
+    vocabularySize: words.vocabularySize,
+    questionRatio: words.questionRatio,
+    wpm: usage.wpm,
+  };
 
   const stored: StoredVoiceProfile = {
     milestone,
@@ -182,6 +198,7 @@ export const generateVoiceProfile = async (opts?: {
     profile,
     catchphrase: base.catchphrase,
     mostUsedWord: base.mostUsedWord,
+    stats,
   };
 
   produceAppState((draft) => {

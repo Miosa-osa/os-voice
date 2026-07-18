@@ -990,6 +990,39 @@ pub async fn export_diagnostics(app: AppHandle, diagnostics_info: String) -> Res
     .map_err(|err| err.to_string())?
 }
 
+/// Save an already-formatted dictionary export (JSON or Markdown glossary) to a
+/// user-chosen location via the native save dialog. The frontend builds the
+/// contents (reusing the tested JSON/Markdown builders) and hands them here so
+/// export works reliably outside the webview's flaky blob-download path.
+#[tauri::command]
+#[specta::specta]
+pub async fn export_dictionary(filename: String, contents: String) -> Result<bool, String> {
+    let ext = std::path::Path::new(&filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("txt")
+        .to_string();
+
+    let dialog = rfd::AsyncFileDialog::new()
+        .set_file_name(&filename)
+        .add_filter(ext.to_uppercase(), &[ext.as_str()])
+        .save_file()
+        .await;
+
+    let save_path = match dialog {
+        Some(handle) => handle.path().to_path_buf(),
+        None => return Ok(false),
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        std::fs::write(&save_path, contents.as_bytes())
+            .map_err(|err| format!("Failed to write dictionary: {err}"))?;
+        Ok::<bool, String>(true)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn term_create(

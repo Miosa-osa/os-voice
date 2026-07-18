@@ -1,19 +1,29 @@
-import { useMemo } from "react";
-import { Box, Card, LinearProgress, Stack, Typography } from "@mui/material";
-import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
-import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
+import { useMemo, useState } from "react";
+import {
+  Box,
+  Button,
+  Card,
+  Dialog,
+  DialogContent,
+  Stack,
+  Typography,
+} from "@mui/material";
+import IosShareIcon from "@mui/icons-material/IosShare";
 import { FormattedMessage } from "react-intl";
 import { Section } from "../common/Section";
 import {
   computeAchievements,
   computeLeaderboard,
 } from "../../lib/insights/compute";
+import { AchievementBadge } from "./AchievementBadge";
 import { InsightsEmpty } from "./InsightsEmpty";
+import { ShareCard } from "./ShareCard";
 import { StatCard } from "./StatCard";
 import { useInsightsSources } from "./useInsightsData";
 
 export const LeaderboardTab = () => {
   const { events, transcriptions } = useInsightsSources();
+  const [shareOpen, setShareOpen] = useState(false);
   const data = useMemo(
     () => computeLeaderboard(events, transcriptions),
     [events, transcriptions],
@@ -58,44 +68,34 @@ export const LeaderboardTab = () => {
           />
         }
       >
-        <Box
-          sx={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-            gap: 1.5,
-          }}
-        >
-          {achievements.map((a) => (
-            <Card
-              key={a.key}
-              variant="outlined"
-              sx={{ p: 1.5, opacity: a.unlocked ? 1 : 0.7 }}
+        <Stack spacing={2}>
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+              gap: 1.5,
+            }}
+          >
+            {achievements.map((a) => (
+              <Card
+                key={a.key}
+                variant="outlined"
+                sx={{ p: 1.5, opacity: a.unlocked ? 1 : 0.75 }}
+              >
+                <AchievementBadge achievement={a} />
+              </Card>
+            ))}
+          </Box>
+          <Box>
+            <Button
+              size="small"
+              startIcon={<IosShareIcon />}
+              onClick={() => setShareOpen(true)}
             >
-              <Stack direction="row" spacing={1} alignItems="center">
-                {a.unlocked ? (
-                  <EmojiEventsIcon color="primary" fontSize="small" />
-                ) : (
-                  <LockOutlinedIcon color="disabled" fontSize="small" />
-                )}
-                <Box flex={1} minWidth={0}>
-                  <Typography variant="body2" fontWeight={600} noWrap>
-                    {a.label}
-                  </Typography>
-                  <Typography variant="caption" color="textSecondary" noWrap>
-                    {a.description}
-                  </Typography>
-                </Box>
-              </Stack>
-              {!a.unlocked && (
-                <LinearProgress
-                  variant="determinate"
-                  value={a.progress * 100}
-                  sx={{ mt: 1, borderRadius: 1 }}
-                />
-              )}
-            </Card>
-          ))}
-        </Box>
+              <FormattedMessage defaultMessage="Share your stats" />
+            </Button>
+          </Box>
+        </Stack>
       </Section>
 
       {data.topApps.length > 0 && (
@@ -117,6 +117,17 @@ export const LeaderboardTab = () => {
           </Stack>
         </Section>
       )}
+
+      <Dialog
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogContent>
+          <ShareCard />
+        </DialogContent>
+      </Dialog>
     </Stack>
   );
 };

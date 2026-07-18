@@ -1,25 +1,59 @@
-import { UsageStats, VoiceProfile, WordAnalysis } from "./compute";
+import { LocalDictationEvent } from "../../repos/insights.repo";
+import {
+  categorizeApp,
+  UsageStats,
+  VoiceProfile,
+  WordAnalysis,
+} from "./compute";
 import { AiVoiceProfile } from "./profile.types";
 
 export const buildProfileSystemPrompt = (): string =>
   "You are an insightful, warm analyst that profiles a person from samples of what they dictated by voice. Be specific and honest, base everything ONLY on the provided samples and stats, and never invent facts. Respond with ONLY a JSON object, no prose or markdown.";
+
+// A compact "words by app category" / "words by tone" breakdown so the model
+// can segment the user's voice by context (e.g. terse in Coding, expansive in
+// Writing) instead of treating all samples as one undifferentiated blob.
+const buildContextBreakdown = (events: LocalDictationEvent[]): string => {
+  const byCategory = new Map<string, number>();
+  const byTone = new Map<string, number>();
+  for (const e of events) {
+    const category = categorizeApp(e.appName);
+    byCategory.set(category, (byCategory.get(category) ?? 0) + e.wordCount);
+    const tone = e.toneId ?? "untagged";
+    byTone.set(tone, (byTone.get(tone) ?? 0) + e.wordCount);
+  }
+  const fmt = (m: Map<string, number>): string =>
+    Array.from(m.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([k, v]) => `${k} ${v.toLocaleString()}w`)
+      .join(" · ");
+  const categoryLine = fmt(byCategory);
+  const toneLine = fmt(byTone);
+  const lines: string[] = [];
+  if (categoryLine) lines.push(`- By app context: ${categoryLine}`);
+  if (toneLine) lines.push(`- By tone: ${toneLine}`);
+  return lines.join("\n");
+};
 
 export const buildProfileUserPrompt = (args: {
   usage: UsageStats;
   profile: VoiceProfile;
   words: WordAnalysis;
   samples: string[];
+  events: LocalDictationEvent[];
   previousIdentity?: string | null;
 }): string => {
-  const { usage, profile, words, samples, previousIdentity } = args;
+  const { usage, profile, words, samples, events, previousIdentity } = args;
   const sample = samples
-    .slice(0, 60)
-    .map((s, i) => `${i + 1}. ${s.slice(0, 320)}`)
+    .slice(0, 100)
+    .map((s, i) => `${i + 1}. ${s.slice(0, 500)}`)
     .join("\n");
   const recent = samples
     .slice(0, 15)
     .map((s) => s.slice(0, 200))
     .join(" / ");
+  const contextBreakdown = buildContextBreakdown(events);
 
   return `Analyze this person's voice-dictation history and produce a profile of them.
 
@@ -37,11 +71,11 @@ STATS:
 - Filler rate: ${words.fillerRate} per 100 words
 - Avg sentence length: ${words.avgSentenceLength} words
 - Questions: ${words.questionRatio}% of sentences
-
+${contextBreakdown ? `${contextBreakdown}\n` : ""}
 SAMPLES (verbatim things they said):
 ${sample}
 
-Be deep and specific — this should feel like it genuinely *gets* them. Return a JSON object with exactly these keys:
+Be deep and specific — this should feel like it genuinely *gets* them. Use the app-context and tone breakdown above to notice if they speak differently in different contexts (e.g. terser while coding, more expansive while writing) and reflect that where it's genuinely visible in the samples. Return a JSON object with exactly these keys:
 {
   "name": "a short evocative persona name that captures them (e.g. The Late-Night Builder)",
   "identity": "2-3 sentences addressed to them, e.g. 'You communicate like... You frequently...'",

@@ -11,6 +11,13 @@ export type LearnedWord = {
   example: string;
   firstLearnedAt: number;
   timesHeard: number;
+  // Epoch millis of the most recent time this word showed up in a transcript.
+  // Undefined for words learned before this was tracked.
+  lastHeardAt?: number;
+  // True when this term is part of the user's characteristic "ubiquitous
+  // language" as identified by the voice profile — surfaced as a distinct,
+  // highlighted section in the dictionary.
+  isUbiquitous?: boolean;
 };
 
 export type VocabState = {

@@ -12,6 +12,8 @@ import {
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import TrendingDownIcon from "@mui/icons-material/TrendingDown";
+import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import dayjs from "dayjs";
 import { FormattedMessage, useIntl } from "react-intl";
 import { Section } from "../common/Section";
@@ -19,6 +21,8 @@ import {
   PROFILE_UNLOCK_WORDS,
   SIGNATURE_UNLOCK_WORDS,
   WORD_ANALYSIS_UNLOCK_WORDS,
+  computeCoachingTrend,
+  computeRecentDictationsSummary,
   computeUsage,
   computeVoiceProfile,
   computeWordAnalysis,
@@ -29,6 +33,7 @@ import {
 import { generateVoiceProfile } from "../../actions/insights.actions";
 import { useAppStore } from "../../store";
 import { InsightsEmpty } from "./InsightsEmpty";
+import { MiniLine } from "./MiniLine";
 import { StatCard } from "./StatCard";
 import { useInsightsSources } from "./useInsightsData";
 import { WordCloud } from "./WordCloud";
@@ -158,6 +163,11 @@ export const YourVoiceTab = () => {
         )
         .slice(0, 12),
     [terms],
+  );
+  const coachingTrend = useMemo(() => computeCoachingTrend(history), [history]);
+  const recentSummary = useMemo(
+    () => computeRecentDictationsSummary(transcriptions, 20),
+    [transcriptions],
   );
 
   useEffect(() => {
@@ -309,10 +319,10 @@ export const YourVoiceTab = () => {
 
           <Typography variant="caption" color="textSecondary">
             {wordsToNext === null ? (
-              <FormattedMessage defaultMessage="You've reached the top milestone — your profile keeps refining." />
+              <FormattedMessage defaultMessage="You've reached the top milestone — your profile keeps living, refreshing itself as you keep dictating." />
             ) : (
               <FormattedMessage
-                defaultMessage="Evolves at your next milestone · {n} words to go"
+                defaultMessage="Evolves at your next milestone ({n} words to go) — and keeps quietly refreshing as you dictate more."
                 values={{ n: wordsToNext.toLocaleString() }}
               />
             )}
@@ -413,10 +423,19 @@ export const YourVoiceTab = () => {
         />
       )}
 
-      {aiProfile?.coaching &&
-        (aiProfile.coaching.strengths.length > 0 ||
-          aiProfile.coaching.growthAreas.length > 0 ||
-          aiProfile.coaching.suggestions.length > 0) && (
+      {(() => {
+        const hasCoachingContent = Boolean(
+          aiProfile?.coaching &&
+          (aiProfile.coaching.strengths.length > 0 ||
+            aiProfile.coaching.growthAreas.length > 0 ||
+            aiProfile.coaching.suggestions.length > 0),
+        );
+        const hasTrend = Boolean(
+          coachingTrend && coachingTrend.summary.length > 0,
+        );
+        if (!hasCoachingContent && !hasTrend && !recentSummary) return null;
+
+        return (
           <Section
             title={<FormattedMessage defaultMessage="Coaching" />}
             description={
@@ -424,30 +443,113 @@ export const YourVoiceTab = () => {
             }
           >
             <Stack spacing={2}>
-              {aiProfile.coaching.strengths.length > 0 && (
-                <CoachingGroup
-                  color="success.main"
-                  label={<FormattedMessage defaultMessage="What you do well" />}
-                  items={aiProfile.coaching.strengths}
-                />
+              {hasTrend && coachingTrend && (
+                <Box>
+                  <Typography
+                    variant="overline"
+                    sx={{
+                      color: "info.main",
+                      display: "block",
+                      fontWeight: 700,
+                    }}
+                  >
+                    <FormattedMessage defaultMessage="Did I improve?" />
+                  </Typography>
+                  <Stack spacing={0.75} sx={{ mt: 0.5 }}>
+                    {coachingTrend.summary.map((item, i) => (
+                      <Stack
+                        key={i}
+                        direction="row"
+                        spacing={1}
+                        alignItems="flex-start"
+                      >
+                        {item.direction === "positive" ? (
+                          <TrendingUpIcon
+                            fontSize="small"
+                            color="success"
+                            sx={{ mt: "1px" }}
+                          />
+                        ) : (
+                          <TrendingDownIcon
+                            fontSize="small"
+                            color="warning"
+                            sx={{ mt: "1px" }}
+                          />
+                        )}
+                        <Typography variant="body2" color="textSecondary">
+                          {item.text}
+                        </Typography>
+                      </Stack>
+                    ))}
+                  </Stack>
+                  {coachingTrend.fillerPoints.length >= 2 && (
+                    <Box sx={{ mt: 1.5 }}>
+                      <Typography variant="caption" color="textSecondary">
+                        <FormattedMessage defaultMessage="Filler rate over time" />
+                      </Typography>
+                      <MiniLine data={coachingTrend.fillerPoints} height={48} />
+                    </Box>
+                  )}
+                </Box>
               )}
-              {aiProfile.coaching.growthAreas.length > 0 && (
-                <CoachingGroup
-                  color="warning.main"
-                  label={<FormattedMessage defaultMessage="Where to grow" />}
-                  items={aiProfile.coaching.growthAreas}
-                />
-              )}
-              {aiProfile.coaching.suggestions.length > 0 && (
-                <CoachingGroup
-                  color="primary.main"
-                  label={<FormattedMessage defaultMessage="Try this next" />}
-                  items={aiProfile.coaching.suggestions}
-                />
+
+              {aiProfile?.coaching?.strengths &&
+                aiProfile.coaching.strengths.length > 0 && (
+                  <CoachingGroup
+                    color="success.main"
+                    label={
+                      <FormattedMessage defaultMessage="What you do well" />
+                    }
+                    items={aiProfile.coaching.strengths}
+                  />
+                )}
+              {aiProfile?.coaching?.growthAreas &&
+                aiProfile.coaching.growthAreas.length > 0 && (
+                  <CoachingGroup
+                    color="warning.main"
+                    label={<FormattedMessage defaultMessage="Where to grow" />}
+                    items={aiProfile.coaching.growthAreas}
+                  />
+                )}
+              {aiProfile?.coaching?.suggestions &&
+                aiProfile.coaching.suggestions.length > 0 && (
+                  <CoachingGroup
+                    color="primary.main"
+                    label={<FormattedMessage defaultMessage="Try this next" />}
+                    items={aiProfile.coaching.suggestions}
+                  />
+                )}
+
+              {recentSummary && (
+                <Box>
+                  <Typography
+                    variant="overline"
+                    color="textSecondary"
+                    sx={{ display: "block", fontWeight: 700 }}
+                  >
+                    <FormattedMessage defaultMessage="Across your recent dictations" />
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    color="textSecondary"
+                    sx={{ mt: 0.5 }}
+                  >
+                    <FormattedMessage
+                      defaultMessage="Looking at your last {count} dictations: about {fillerRate} filler words per 100, {avgLen}-word sentences on average, and {q}% phrased as questions."
+                      values={{
+                        count: recentSummary.count,
+                        fillerRate: recentSummary.words.fillerRate,
+                        avgLen: recentSummary.words.avgSentenceLength,
+                        q: recentSummary.words.questionRatio,
+                      }}
+                    />
+                  </Typography>
+                </Box>
               )}
             </Stack>
           </Section>
-        )}
+        );
+      })()}
 
       {totalWords >= SIGNATURE_UNLOCK_WORDS ? (
         <Section title={<FormattedMessage defaultMessage="Signature" />}>

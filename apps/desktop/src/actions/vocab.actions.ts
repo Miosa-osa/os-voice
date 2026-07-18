@@ -71,13 +71,16 @@ export const refreshLearnedVocabulary = async (): Promise<void> => {
         byKey.set(key, {
           ...existing,
           timesHeard: Math.max(existing.timesHeard, item.count),
-          example: existing.example || item.example,
+          // Prefer the freshest example so definitions reflect current usage.
+          example: item.example || existing.example,
+          lastHeardAt: now,
         });
       } else {
         byKey.set(key, {
           word: item.word,
           example: item.example,
           firstLearnedAt: now,
+          lastHeardAt: now,
           timesHeard: item.count,
         });
       }
@@ -94,10 +97,58 @@ export const refreshLearnedVocabulary = async (): Promise<void> => {
       draft.vocab.learnedWords = merged.map((w) => w.word);
     });
 
-    await enrichLearnedVocabulary();
+    await syncUbiquitousLanguage();
   } catch (error) {
     getLogger().error(`Failed to refresh learned vocabulary: ${error}`);
   }
+};
+
+// D2 bridge: the voice profile identifies the user's "ubiquitous language" — the
+// characteristic recurring vocabulary they live in. Fold those terms into the
+// dictionary, flagged so the UI can surface them as their own highlighted
+// section, then enrich so each gets a real definition. The profile is the source
+// of truth, so stale flags are cleared each sync. No-op (beyond enrich) when no
+// profile has been generated yet.
+export const syncUbiquitousLanguage = async (): Promise<void> => {
+  const state = getAppState();
+  const terms = (state.insights?.aiProfile?.ubiquitousLanguage ?? [])
+    .map((t) => t.trim())
+    .filter(Boolean);
+
+  if (terms.length > 0) {
+    const now = Date.now();
+    const dismissed = new Set(
+      (state.local.dismissedVocab ?? []).map((w) => w.toLowerCase()),
+    );
+    produceAppState((draft) => {
+      const list = draft.local.learnedVocab ?? [];
+      const byKey = new Map(list.map((w) => [w.word.toLowerCase(), w]));
+      for (const w of list) w.isUbiquitous = false;
+      for (const term of terms) {
+        const key = term.toLowerCase();
+        if (dismissed.has(key)) continue;
+        const existing = byKey.get(key);
+        if (existing) {
+          existing.isUbiquitous = true;
+        } else {
+          const added: LearnedWord = {
+            word: term,
+            example: "",
+            firstLearnedAt: now,
+            lastHeardAt: now,
+            timesHeard: 0,
+            isUbiquitous: true,
+          };
+          list.push(added);
+          byKey.set(key, added);
+        }
+      }
+      draft.local.learnedVocab = list;
+      draft.vocab.learnedWords = list.map((w) => w.word);
+    });
+  }
+
+  await enrichLearnedVocabulary();
 };
 
 // Batched, cached LLM enrichment: categorize + define only the words that don't
@@ -114,14 +165,21 @@ export const enrichLearnedVocabulary = async (): Promise<void> => {
   if (pending.length === 0) return;
 
   const system =
-    "You are a precise lexicographer for a voice-dictation app. Given a list of words and phrases a user frequently says, classify and briefly define each. Respond with ONLY a JSON array, no prose or markdown.";
-  const list = pending.map((w, i) => `${i + 1}. ${w.word}`).join("\n");
+    "You are a precise lexicographer for a voice-dictation app. For each word or phrase the user frequently says you are given a real sentence where they used it. Infer the meaning FROM HOW THEY ACTUALLY USE IT and write a good, specific definition — even from a single spoken example, commit to the most likely meaning in their domain rather than hedging. Respond with ONLY a JSON array, no prose or markdown.";
+  const list = pending
+    .map((w, i) => {
+      const ctx = w.example?.trim();
+      return ctx
+        ? `${i + 1}. "${w.word}" — heard in: "${ctx}"`
+        : `${i + 1}. "${w.word}"`;
+    })
+    .join("\n");
   const prompt = `For each of these words/phrases the user dictates often, return an object with:
 - "word": the exact word/phrase, copied verbatim
 - "category": one of "acronym" | "technical" | "proper" | "phrase" | "word"
-- "definition": one short, plain-language sentence explaining what it means (in the user's domain if it's a term). Keep it under 20 words.
+- "definition": one plain-language sentence (under 25 words) explaining what THIS user means by it, grounded in the example sentence provided. If it's a domain term, define it in that domain. Do not say "unclear" or restate the word — always produce a useful definition.
 
-WORDS:
+WORDS (with the context they were heard in):
 ${list}
 
 Return ONLY a JSON array like:

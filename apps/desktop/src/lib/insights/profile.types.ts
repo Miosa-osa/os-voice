@@ -25,6 +25,17 @@ export type Coaching = {
   suggestions: string[];
 };
 
+// A snapshot of the measured speaking stats at the moment a profile was
+// generated, so we can compare generations over time and show real trends
+// (e.g. "filler words down 30% since your last profile").
+export type CoachingSnapshot = {
+  fillerRate: number;
+  avgSentenceLength: number;
+  vocabularySize: number;
+  questionRatio: number;
+  wpm: number;
+};
+
 export type StoredVoiceProfile = {
   milestone: number;
   createdAt: number;
@@ -32,4 +43,7 @@ export type StoredVoiceProfile = {
   profile: AiVoiceProfile;
   catchphrase: string | null;
   mostUsedWord: string | null;
+  // Optional for backward compatibility with profiles persisted before this
+  // field existed.
+  stats?: CoachingSnapshot;
 };
