@@ -45,6 +45,38 @@ export type CoachingSnapshot = {
   wpm: number;
 };
 
+// A "how I am today" snapshot generated from a single calendar day's worth of
+// dictations, layered on top of the stable CORE profile (AiVoiceProfile). A
+// user accumulates a timeline of these — one per day — so they can look back
+// and see how they've changed day to day, distinct from the slow-moving core
+// identity above.
+export type DailyProfile = {
+  // Calendar day this snapshot covers, e.g. "2026-07-18".
+  date: string;
+  // When this snapshot was (re)generated.
+  createdAt: number;
+  wordsToday: number;
+  dictationsToday: number;
+  // 2-3 sentences: what they focused on today.
+  summary: string;
+  // Short mood read for the day, e.g. "Upbeat and energized".
+  mood: string;
+  // Short energy read for the day, e.g. "High, fast-paced".
+  energy: string;
+  // What they worked on today, as a short list of topics/tasks.
+  focus: string[];
+  // A standout moment/quote from today's dictations.
+  notable: string;
+  // A linguistic read specific to today (distinct from the core's
+  // long-term "howYouSpeak").
+  howYouSpokeToday: string;
+  // One sentence: how today compares to their usual baseline.
+  comparedToUsual: string;
+  // false when this is a templated/offline fallback rather than a real
+  // model-generated read (mirrors AiVoiceProfile.generated).
+  generated: boolean;
+};
+
 export type StoredVoiceProfile = {
   milestone: number;
   createdAt: number;

@@ -1,5 +1,8 @@
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Box,
   Button,
   Card,
@@ -12,10 +15,13 @@ import {
 import { alpha, useTheme } from "@mui/material/styles";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import BoltRoundedIcon from "@mui/icons-material/BoltRounded";
+import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import FitnessCenterRoundedIcon from "@mui/icons-material/FitnessCenterRounded";
 import FlagRoundedIcon from "@mui/icons-material/FlagRounded";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import TodayRoundedIcon from "@mui/icons-material/TodayRounded";
 import TrendingDownIcon from "@mui/icons-material/TrendingDown";
 import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import dayjs from "dayjs";
@@ -40,7 +46,16 @@ import {
   computeFocusThisWeek,
   gradeColor,
 } from "../../lib/insights/coaching";
-import { generateVoiceProfile } from "../../actions/insights.actions";
+import { DailyProfile } from "../../lib/insights/profile.types";
+import {
+  buildDailyReport,
+  buildProfileReport,
+  downloadReport,
+} from "../../lib/insights/report";
+import {
+  generateDailyProfile,
+  generateVoiceProfile,
+} from "../../actions/insights.actions";
 import { useAppStore } from "../../store";
 import { InsightsEmpty } from "./InsightsEmpty";
 import { MiniLine } from "./MiniLine";
@@ -200,6 +215,191 @@ const LockedSection = ({
   </Section>
 );
 
+// The full "Today" card: today's daily snapshot with regenerate/download
+// actions. Shown expanded and prominent above the timeline of past days.
+const TodaySnapshotCard = ({
+  daily,
+  loading,
+  onRegenerate,
+  onDownload,
+}: {
+  daily: DailyProfile;
+  loading: boolean;
+  onRegenerate: () => void;
+  onDownload: () => void;
+}) => {
+  const theme = useTheme();
+  return (
+    <Card
+      variant="outlined"
+      sx={{
+        p: 3,
+        borderRadius: 3,
+        borderColor: alpha(theme.palette.info.main, 0.3),
+        background: `linear-gradient(135deg, ${alpha(theme.palette.info.main, 0.08)}, ${alpha(theme.palette.info.main, 0.02)})`,
+      }}
+    >
+      <Stack spacing={1.5}>
+        <Stack
+          direction="row"
+          justifyContent="space-between"
+          alignItems="center"
+        >
+          <Stack direction="row" spacing={1} alignItems="center">
+            <TodayRoundedIcon color="info" fontSize="small" />
+            <Typography variant="overline" color="info.main" fontWeight={700}>
+              <FormattedMessage
+                defaultMessage="Today · {date}"
+                values={{ date: dayjs(daily.date).format("MMM D") }}
+              />
+            </Typography>
+          </Stack>
+          <Stack direction="row" spacing={1}>
+            <Button
+              size="small"
+              startIcon={
+                loading ? <CircularProgress size={14} /> : <RefreshIcon />
+              }
+              disabled={loading}
+              onClick={onRegenerate}
+            >
+              {loading ? (
+                <FormattedMessage defaultMessage="Analyzing…" />
+              ) : (
+                <FormattedMessage defaultMessage="Regenerate" />
+              )}
+            </Button>
+            <Button
+              size="small"
+              startIcon={<DownloadRoundedIcon />}
+              onClick={onDownload}
+              aria-label="Download today's snapshot"
+            >
+              <FormattedMessage defaultMessage="Download" />
+            </Button>
+          </Stack>
+        </Stack>
+
+        {daily.summary && (
+          <Typography variant="body1">{daily.summary}</Typography>
+        )}
+
+        {(daily.mood || daily.energy) && (
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            {daily.mood && (
+              <Chip size="small" color="info" label={`Mood: ${daily.mood}`} />
+            )}
+            {daily.energy && (
+              <Chip
+                size="small"
+                variant="outlined"
+                color="info"
+                label={`Energy: ${daily.energy}`}
+              />
+            )}
+          </Stack>
+        )}
+
+        {daily.focus.length > 0 && (
+          <Box>
+            <Typography variant="caption" color="textSecondary">
+              <FormattedMessage defaultMessage="Focused on today" />
+            </Typography>
+            <Box pt={0.5}>
+              <ChipRow items={daily.focus} />
+            </Box>
+          </Box>
+        )}
+
+        {daily.notable && (
+          <Typography variant="body2" color="textSecondary" fontStyle="italic">
+            {`“${daily.notable}”`}
+          </Typography>
+        )}
+
+        {daily.comparedToUsual && (
+          <Typography variant="body2" color="textSecondary">
+            {daily.comparedToUsual}
+          </Typography>
+        )}
+      </Stack>
+    </Card>
+  );
+};
+
+// A single compact row in the daily-snapshot timeline: date, one-line
+// summary, mood — expandable for the rest of the fields, with its own
+// download action.
+const DailyTimelineItem = ({
+  daily,
+  onDownload,
+}: {
+  daily: DailyProfile;
+  onDownload: () => void;
+}) => (
+  <Accordion
+    disableGutters
+    elevation={0}
+    sx={{
+      "&:before": { display: "none" },
+      border: 1,
+      borderColor: "divider",
+      borderRadius: 2,
+      overflow: "hidden",
+    }}
+  >
+    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+      <Stack sx={{ width: "100%", pr: 1 }} spacing={0.25}>
+        <Stack direction="row" justifyContent="space-between" spacing={2}>
+          <Typography fontWeight={600}>
+            {dayjs(daily.date).format("MMM D, YYYY")}
+          </Typography>
+          {daily.mood && (
+            <Typography variant="caption" color="textSecondary">
+              {daily.mood}
+            </Typography>
+          )}
+        </Stack>
+        {daily.summary && (
+          <Typography variant="body2" color="textSecondary" noWrap>
+            {daily.summary}
+          </Typography>
+        )}
+      </Stack>
+    </AccordionSummary>
+    <AccordionDetails>
+      <Stack spacing={1.5}>
+        {daily.focus.length > 0 && <ChipRow items={daily.focus} />}
+        {daily.notable && (
+          <Typography variant="body2" color="textSecondary" fontStyle="italic">
+            {`“${daily.notable}”`}
+          </Typography>
+        )}
+        {daily.howYouSpokeToday && (
+          <Typography variant="body2" color="textSecondary">
+            {daily.howYouSpokeToday}
+          </Typography>
+        )}
+        {daily.comparedToUsual && (
+          <Typography variant="body2" color="textSecondary">
+            {daily.comparedToUsual}
+          </Typography>
+        )}
+        <Box>
+          <Button
+            size="small"
+            startIcon={<DownloadRoundedIcon />}
+            onClick={onDownload}
+            aria-label={`Download snapshot for ${daily.date}`}
+          >
+            <FormattedMessage defaultMessage="Download" />
+          </Button>
+        </Box>
+      </Stack>
+    </AccordionDetails>
+  </Accordion>
+);
+
 export const YourVoiceTab = () => {
   const intl = useIntl();
   const theme = useTheme();
@@ -207,11 +407,13 @@ export const YourVoiceTab = () => {
   const aiProfile = useAppStore((s) => s.insights.aiProfile);
   const aiStatus = useAppStore((s) => s.insights.aiProfileStatus);
   const history = useAppStore((s) => s.local.voiceProfiles ?? []);
+  const dailyProfiles = useAppStore((s) => s.local.dailyProfiles ?? []);
 
-  const totalWords = useMemo(
-    () => computeUsage(events, transcriptions).totalWords,
+  const usage = useMemo(
+    () => computeUsage(events, transcriptions),
     [events, transcriptions],
   );
+  const totalWords = usage.totalWords;
   const milestone = milestoneFor(totalWords);
   const fallback = useMemo(
     () => computeVoiceProfile(events, transcriptions, terms, milestone),
@@ -250,11 +452,78 @@ export const YourVoiceTab = () => {
   );
   const coachingDrills = useMemo(() => computeCoachingDrills(words), [words]);
 
+  // "Today" is anchored to the most recent dictation's calendar day (not the
+  // local clock's today), matching generateDailyProfile's default so the UI
+  // and the generator always agree on which day is "today".
+  const latestDictationDate = useMemo(() => {
+    const active = transcriptions
+      .filter((t) => !t.isDeleted && t.transcript.trim().length > 0)
+      .slice()
+      .sort(
+        (a, b) => dayjs(b.createdAt).valueOf() - dayjs(a.createdAt).valueOf(),
+      );
+    return active.length > 0
+      ? dayjs(active[0].createdAt).format("YYYY-MM-DD")
+      : null;
+  }, [transcriptions]);
+
+  const hasDictationsToday = latestDictationDate !== null;
+  const todayProfile = useMemo(
+    () => dailyProfiles.find((d) => d.date === latestDictationDate) ?? null,
+    [dailyProfiles, latestDictationDate],
+  );
+  const pastDailyProfiles = useMemo(
+    () => dailyProfiles.filter((d) => d.date !== latestDictationDate),
+    [dailyProfiles, latestDictationDate],
+  );
+
+  const [dailyLoading, setDailyLoading] = useState(false);
+  const dailyAutoGenRef = useRef(false);
+
   useEffect(() => {
     if (totalWords >= PROFILE_UNLOCK_WORDS) {
       void generateVoiceProfile();
     }
   }, [totalWords, milestone]);
+
+  useEffect(() => {
+    if (dailyAutoGenRef.current) return;
+    if (!hasDictationsToday) return;
+    if (todayProfile?.generated) return;
+    dailyAutoGenRef.current = true;
+    setDailyLoading(true);
+    void generateDailyProfile().finally(() => setDailyLoading(false));
+  }, [hasDictationsToday, todayProfile]);
+
+  const handleRegenerateDaily = useCallback(() => {
+    if (!latestDictationDate) return;
+    setDailyLoading(true);
+    void generateDailyProfile({
+      date: latestDictationDate,
+      force: true,
+    }).finally(() => setDailyLoading(false));
+  }, [latestDictationDate]);
+
+  const handleDownloadDaily = useCallback(
+    (daily: DailyProfile) => {
+      const contents = buildDailyReport(daily, {
+        profileName: aiProfile?.name ?? fallback.name,
+      });
+      void downloadReport(`os-voice-daily-${daily.date}.md`, contents);
+    },
+    [aiProfile, fallback.name],
+  );
+
+  const handleDownloadCoreReport = useCallback(() => {
+    if (!aiProfile) return;
+    const contents = buildProfileReport({
+      profile: aiProfile,
+      usage,
+      daily: todayProfile,
+    });
+    const filename = `os-voice-profile-${dayjs().format("YYYY-MM-DD")}.md`;
+    void downloadReport(filename, contents);
+  }, [aiProfile, usage, todayProfile]);
 
   if (totalWords === 0) {
     return <InsightsEmpty />;
@@ -300,6 +569,26 @@ export const YourVoiceTab = () => {
 
   return (
     <Stack spacing={3}>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        justifyContent="space-between"
+        alignItems={{ xs: "flex-start", sm: "center" }}
+        spacing={1}
+      >
+        <Typography variant="overline" color="textSecondary" fontWeight={700}>
+          <FormattedMessage defaultMessage="Your core profile" />
+        </Typography>
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<DownloadRoundedIcon />}
+          disabled={!aiProfile}
+          onClick={handleDownloadCoreReport}
+        >
+          <FormattedMessage defaultMessage="Download report" />
+        </Button>
+      </Stack>
+
       <Card variant="outlined" sx={{ p: 3 }}>
         <Stack spacing={1.5}>
           <Stack
@@ -409,6 +698,60 @@ export const YourVoiceTab = () => {
           </Typography>
         </Stack>
       </Card>
+
+      {(hasDictationsToday || pastDailyProfiles.length > 0) && (
+        <Stack spacing={1.5}>
+          <Box>
+            <Typography variant="h6" fontWeight={700}>
+              <FormattedMessage defaultMessage="Daily snapshots" />
+            </Typography>
+            <Typography variant="body2" color="textSecondary">
+              <FormattedMessage defaultMessage="How you are today — a timeline separate from your stable core profile, so you can track how you change day to day." />
+            </Typography>
+          </Box>
+
+          {hasDictationsToday &&
+            (todayProfile ? (
+              <TodaySnapshotCard
+                daily={todayProfile}
+                loading={dailyLoading}
+                onRegenerate={handleRegenerateDaily}
+                onDownload={() => handleDownloadDaily(todayProfile)}
+              />
+            ) : (
+              <Card variant="outlined" sx={{ p: 3 }}>
+                <Stack
+                  direction="row"
+                  spacing={1.5}
+                  alignItems="center"
+                  justifyContent="center"
+                >
+                  <CircularProgress size={16} />
+                  <Typography variant="body2" color="textSecondary">
+                    <FormattedMessage defaultMessage="Building today's snapshot…" />
+                  </Typography>
+                </Stack>
+              </Card>
+            ))}
+
+          {pastDailyProfiles.length > 0 && (
+            <Stack spacing={1}>
+              <Typography variant="caption" color="textSecondary">
+                <FormattedMessage defaultMessage="Previous days" />
+              </Typography>
+              <Stack spacing={1}>
+                {pastDailyProfiles.map((daily) => (
+                  <DailyTimelineItem
+                    key={daily.date}
+                    daily={daily}
+                    onDownload={() => handleDownloadDaily(daily)}
+                  />
+                ))}
+              </Stack>
+            </Stack>
+          )}
+        </Stack>
+      )}
 
       {aiProfile?.portrait && (
         <Card

@@ -285,7 +285,11 @@ export const theme = createTheme({
       styleOverrides: {
         outlined: ({ theme }) => ({
           backgroundColor: theme.vars.palette.level0,
-          border: `1px solid ${theme.vars.palette.primary}`,
+          // Was `palette.primary` (an object) which stringified to
+          // "[object Object]" and got dropped, leaving every outlined card
+          // borderless. Use the same subtle border token the flat cards use so
+          // borders render and stay cohesive across the app.
+          border: `1px solid ${theme.vars.palette.level2}`,
         }),
       },
       variants: [

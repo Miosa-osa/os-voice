@@ -1,8 +1,11 @@
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import AutoAwesomeRoundedIcon from "@mui/icons-material/AutoAwesomeRounded";
 import BookmarkAddOutlinedIcon from "@mui/icons-material/BookmarkAddOutlined";
+import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
+import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
 import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
+import HelpOutlineRoundedIcon from "@mui/icons-material/HelpOutlineRounded";
 import {
   Box,
   Button,
@@ -24,6 +27,7 @@ import { showErrorSnackbar, showSnackbar } from "../../actions/app.actions";
 import { loadDictionary } from "../../actions/dictionary.actions";
 import { setLocalStorageValue } from "../../actions/local-storage.actions";
 import {
+  confirmLearnedWord,
   dismissLearnedWord,
   refreshLearnedVocabulary,
   syncUbiquitousLanguage,
@@ -414,6 +418,7 @@ export default function DictionaryPage() {
               highlight
               onDismiss={dismissLearnedWord}
               onPromote={handlePromote}
+              onConfirm={confirmLearnedWord}
             />
           );
         case "learned":
@@ -422,6 +427,7 @@ export default function DictionaryPage() {
               word={row.word}
               onDismiss={dismissLearnedWord}
               onPromote={handlePromote}
+              onConfirm={confirmLearnedWord}
             />
           );
         default:
@@ -530,18 +536,34 @@ function SectionHeader({
   );
 }
 
+// Whether the AI's verification signal for this entry should read as a
+// confident "real term" check, a "not sure" question mark, or neither (no
+// signal yet — enrichment hasn't run, e.g. lite mode or freshly learned).
+// A user confirmation always wins and is never re-questioned.
+type VerificationStatus = "verified" | "questionable" | "pending";
+
+const verificationStatusOf = (word: LearnedWord): VerificationStatus => {
+  if (word.verified) return "verified";
+  if (word.isTerm === true && word.confidence !== "low") return "verified";
+  if (word.isTerm === false || word.confidence === "low") return "questionable";
+  return "pending";
+};
+
 function LearnedWordRow({
   word,
   onDismiss,
   onPromote,
+  onConfirm,
   highlight,
 }: {
   word: LearnedWord;
   onDismiss: (word: string) => void;
   onPromote: (word: string) => void;
+  onConfirm: (word: string) => void;
   highlight?: boolean;
 }) {
   const intl = useIntl();
+  const status = verificationStatusOf(word);
   return (
     <Stack
       direction="row"
@@ -562,6 +584,38 @@ function LearnedWordRow({
       <Box sx={{ flex: 1, minWidth: 0 }}>
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
           <Typography fontWeight={600}>{word.word}</Typography>
+          {status === "verified" && (
+            <Tooltip
+              disableInteractive
+              title={
+                <FormattedMessage defaultMessage="The AI is confident this is a real term" />
+              }
+            >
+              <CheckCircleRoundedIcon
+                fontSize="small"
+                color="success"
+                aria-label={intl.formatMessage({
+                  defaultMessage: "Verified term",
+                })}
+              />
+            </Tooltip>
+          )}
+          {status === "questionable" && (
+            <Tooltip
+              disableInteractive
+              title={
+                <FormattedMessage defaultMessage="The AI isn't sure this is a real term" />
+              }
+            >
+              <HelpOutlineRoundedIcon
+                fontSize="small"
+                color="warning"
+                aria-label={intl.formatMessage({
+                  defaultMessage: "Needs review",
+                })}
+              />
+            </Tooltip>
+          )}
           {word.category && (
             <Chip
               label={<CategoryLabel category={word.category} />}
@@ -601,6 +655,25 @@ function LearnedWordRow({
           </Typography>
         )}
       </Box>
+      {status === "questionable" && (
+        <Tooltip
+          disableInteractive
+          title={
+            <FormattedMessage defaultMessage="Keep — confirm this is a real term" />
+          }
+        >
+          <IconButton
+            size="small"
+            aria-label={intl.formatMessage(
+              { defaultMessage: "Confirm {word} is a real term" },
+              { word: word.word },
+            )}
+            onClick={() => onConfirm(word.word)}
+          >
+            <CheckRoundedIcon fontSize="small" color="success" />
+          </IconButton>
+        </Tooltip>
+      )}
       <Tooltip
         disableInteractive
         title={<FormattedMessage defaultMessage="Add to your dictionary" />}
@@ -619,7 +692,11 @@ function LearnedWordRow({
       <Tooltip
         disableInteractive
         title={
-          <FormattedMessage defaultMessage="Remove and don't learn again" />
+          status === "questionable" ? (
+            <FormattedMessage defaultMessage="Dismiss — remove and don't learn again" />
+          ) : (
+            <FormattedMessage defaultMessage="Remove and don't learn again" />
+          )
         }
       >
         <IconButton

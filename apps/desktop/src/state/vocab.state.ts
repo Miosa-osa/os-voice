@@ -18,6 +18,16 @@ export type LearnedWord = {
   // language" as identified by the voice profile — surfaced as a distinct,
   // highlighted section in the dictionary.
   isUbiquitous?: boolean;
+  // Whether the enrichment model believes this is a genuine, dictionary-worthy
+  // word/term/name rather than transcription noise, a filler phrase, or a
+  // random run of words. Undefined until enrichment has run.
+  isTerm?: boolean;
+  // How confident the enrichment model is in `isTerm`. Undefined until
+  // enrichment has run.
+  confidence?: "high" | "medium" | "low";
+  // True once the user has explicitly confirmed this entry is a real term —
+  // overrides `isTerm`/`confidence` so it's never questioned again.
+  verified?: boolean;
 };
 
 export type VocabState = {

@@ -5,6 +5,7 @@ import {
   getTranscriptionRepo,
 } from "../repos";
 import { LocalDictationEvent } from "../repos/insights.repo";
+import dayjs from "dayjs";
 import {
   computeUsage,
   computeVoiceProfile,
@@ -16,6 +17,11 @@ import {
   templatedProfile,
 } from "../lib/insights/compute";
 import {
+  buildDailyPrompt,
+  buildDailySystemPrompt,
+  parseDailyResponse,
+} from "../lib/insights/daily-prompt";
+import {
   buildProfileSystemPrompt,
   buildProfileUserPrompt,
   parseProfileResponse,
@@ -23,6 +29,7 @@ import {
 import {
   AiVoiceProfile,
   CoachingSnapshot,
+  DailyProfile,
   StoredVoiceProfile,
 } from "../lib/insights/profile.types";
 import { OllamaGenerateTextRepo } from "../repos/generate-text.repo";
@@ -225,6 +232,144 @@ export const generateVoiceProfile = async (opts?: {
     history.sort((a, b) => a.milestone - b.milestone);
     draft.local.voiceProfiles = history;
   });
+};
+
+// How many daily snapshots to retain in the timeline, so local.dailyProfiles
+// doesn't grow unbounded for very long-lived users.
+const DAILY_PROFILE_HISTORY_CAP = 60;
+
+// Reentrancy guard keyed by date: the live-refresh effect on YourVoiceTab can
+// re-fire while dictating, so bail if a generation for that specific date is
+// already in flight rather than letting overlapping calls race each other.
+const inFlightDailyDates = new Set<string>();
+
+const countWordsRough = (text: string): number =>
+  text.trim().length === 0 ? 0 : text.trim().split(/\s+/).length;
+
+// Generates (or regenerates) the "how I am today" snapshot for a single
+// calendar day, layered on top of the stable CORE profile. Unlike
+// generateVoiceProfile (which looks at everything ever dictated),
+// this looks ONLY at that day's dictations.
+export const generateDailyProfile = async (opts?: {
+  date?: string;
+  force?: boolean;
+}): Promise<void> => {
+  const state = getAppState();
+  const active = Object.values(state.transcriptionById).filter(
+    (t) => !t.isDeleted && t.transcript.trim().length > 0,
+  );
+  if (active.length === 0) return;
+
+  // Default date = the newest transcription's calendar day rather than the
+  // local clock's "today", so a session that runs past midnight still lands
+  // on the day the words were actually said.
+  const newest = active
+    .slice()
+    .sort(
+      (a, b) => dayjs(b.createdAt).valueOf() - dayjs(a.createdAt).valueOf(),
+    )[0];
+  const date = opts?.date ?? dayjs(newest.createdAt).format("YYYY-MM-DD");
+
+  const dayTranscriptions = active.filter(
+    (t) => dayjs(t.createdAt).format("YYYY-MM-DD") === date,
+  );
+  if (dayTranscriptions.length === 0) return;
+
+  const history = state.local.dailyProfiles ?? [];
+  const existing = history.find((d) => d.date === date);
+  // Cache: skip regen if a real (model-generated) snapshot already exists
+  // for this date and the caller isn't forcing a refresh.
+  if (existing?.generated && !opts?.force) return;
+
+  if (!opts?.force && inFlightDailyDates.has(date)) return;
+  inFlightDailyDates.add(date);
+
+  try {
+    const wordsToday = dayTranscriptions.reduce(
+      (n, t) => n + countWordsRough(t.transcript),
+      0,
+    );
+    const dictationsToday = dayTranscriptions.length;
+    const samples = sampleTranscripts(dayTranscriptions, 60);
+
+    const aiProfile = state.insights.aiProfile;
+    const baseline =
+      aiProfile?.identity ??
+      aiProfile?.portrait ??
+      "not enough history yet to have a clear baseline";
+
+    let fields: ReturnType<typeof parseDailyResponse> = null;
+    const liteMode = state.local.liteMode === true;
+    if (!liteMode) {
+      try {
+        const input = {
+          system: buildDailySystemPrompt(),
+          prompt: buildDailyPrompt({
+            date,
+            samples,
+            wordsToday,
+            dictationsToday,
+            baseline,
+          }),
+        };
+        const ollamaUrl =
+          getMyUserPreferences(state)?.postProcessingOllamaUrl ??
+          DEFAULT_OLLAMA_URL;
+        let text: string | null = null;
+        try {
+          const deep = new OllamaGenerateTextRepo(ollamaUrl, PROFILE_MODEL);
+          text = (await deep.generateText(input)).text;
+        } catch (deepError) {
+          getLogger().warning(
+            `Deep daily profile model unavailable: ${deepError}`,
+          );
+          const gen = getGenerateTextRepo();
+          if (!gen.repo) throw new Error("no generation model configured");
+          text = (await gen.repo.generateText(input)).text;
+        }
+        fields = parseDailyResponse(text);
+      } catch (error) {
+        getLogger().warning(
+          `Daily profile generation fell back to template: ${error}`,
+        );
+      }
+    }
+
+    const daily: DailyProfile = fields
+      ? {
+          date,
+          createdAt: Date.now(),
+          wordsToday,
+          dictationsToday,
+          ...fields,
+          generated: true,
+        }
+      : {
+          date,
+          createdAt: Date.now(),
+          wordsToday,
+          dictationsToday,
+          summary: `You dictated ${wordsToday.toLocaleString()} words across ${dictationsToday} dictation${dictationsToday === 1 ? "" : "s"} today.`,
+          mood: "",
+          energy: "",
+          focus: [],
+          notable: "",
+          howYouSpokeToday: "",
+          comparedToUsual: "",
+          generated: false,
+        };
+
+    produceAppState((draft) => {
+      const dedup = (draft.local.dailyProfiles ?? []).filter(
+        (d) => d.date !== date,
+      );
+      dedup.push(daily);
+      dedup.sort((a, b) => b.date.localeCompare(a.date));
+      draft.local.dailyProfiles = dedup.slice(0, DAILY_PROFILE_HISTORY_CAP);
+    });
+  } finally {
+    inFlightDailyDates.delete(date);
+  }
 };
 
 export type TranscriptReview = {
