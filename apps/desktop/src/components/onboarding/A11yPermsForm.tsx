@@ -100,7 +100,8 @@ export const A11yPermsForm = () => {
     <Box
       sx={{
         borderRadius: "12px",
-        border: "1px solid gray",
+        border: "1px solid",
+        borderColor: "level2",
         overflow: "hidden",
         maxHeight: "100%",
       }}

@@ -98,7 +98,8 @@ export const MicPermsForm = () => {
     <Box
       sx={{
         borderRadius: "24px",
-        border: "1px solid gray",
+        border: "1px solid",
+        borderColor: "level2",
         overflow: "hidden",
         maxHeight: "100%",
         margin: 8,

@@ -1,6 +1,8 @@
 import {
+  Alert,
   Box,
   Button,
+  Chip,
   CircularProgress,
   FormControl,
   InputLabel,
@@ -10,8 +12,8 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
-import { useCallback, useEffect } from "react";
-import { FormattedMessage, useIntl } from "react-intl";
+import { useCallback, useEffect, useState } from "react";
+import { FormattedMessage, useIntl, type IntlShape } from "react-intl";
 import {
   refreshLocalTranscriptionDevices,
   deleteLocalTranscriptionModel,
@@ -19,12 +21,17 @@ import {
   refreshLocalTranscriptionModelStatuses,
 } from "../../actions/settings-local-transcription.actions";
 import { showErrorSnackbar } from "../../actions/app.actions";
+import { detectAndRecommend } from "../../actions/hardware.actions";
 import {
   setPreferredTranscriptionApiKeyId,
   setPreferredTranscriptionDevice,
   setPreferredTranscriptionMode,
   setPreferredTranscriptionModelSize,
 } from "../../actions/user.actions";
+import type {
+  DeviceCapability,
+  TranscriptionRecommendation,
+} from "../../lib/hardware/recommend";
 import {
   isLocalTranscriptionModelDownloadInProgress,
   isLocalTranscriptionModelSelectable,
@@ -34,6 +41,7 @@ import { CPU_DEVICE_VALUE, type TranscriptionMode } from "../../types/ai.types";
 import { getAllowsChangeTranscription } from "../../utils/enterprise.utils";
 import { getEffectiveTranscriptionMode } from "../../utils/user.utils";
 import { formatSize } from "../../utils/format.utils";
+import { getLogger } from "../../utils/log.utils";
 import { type LocalSidecarDownloadSnapshot } from "../../sidecars";
 import {
   type LocalWhisperModel,
@@ -92,6 +100,66 @@ const MODEL_OPTIONS: ModelOption[] = [
   },
 ];
 
+// Relative compute weight of the standard Whisper size ladder, lightest to
+// heaviest. Used only to warn when a user picks something heavier than what
+// recommendTranscription() already deemed comfortable for their hardware.
+// hindi2hinglish is a specialty language model outside this ladder and is
+// intentionally excluded from the guardrail.
+const MODEL_WEIGHT: Partial<Record<LocalWhisperModel, number>> = {
+  tiny: 0,
+  base: 1,
+  small: 2,
+  medium: 3,
+  turbo: 4,
+  large: 5,
+};
+
+const shortModelLabel = (label: string): string =>
+  label.replace(/\s*\([^)]*\)\s*$/, "");
+
+// Grounded in recommendTranscription()'s tiers only (see lib/hardware/recommend.ts) —
+// no hardware numbers are invented here.
+const getHardwareHint = (
+  intl: IntlShape,
+  rec: TranscriptionRecommendation,
+  cap: DeviceCapability,
+  modelLabel: string,
+): string => {
+  switch (rec.tier) {
+    case "gpu-turbo":
+      return intl.formatMessage(
+        {
+          defaultMessage: "GPU detected ({gpu}) — {model} runs fast.",
+        },
+        { gpu: cap.gpuName ?? "GPU", model: modelLabel },
+      );
+    case "cpu-small":
+      return intl.formatMessage(
+        {
+          defaultMessage:
+            "Capable CPU detected — {model} balances speed and accuracy.",
+        },
+        { model: modelLabel },
+      );
+    case "cpu-base":
+      return intl.formatMessage(
+        {
+          defaultMessage: "CPU only — {model} is the fastest good fit.",
+        },
+        { model: modelLabel },
+      );
+    case "cpu-tiny":
+    default:
+      return intl.formatMessage(
+        {
+          defaultMessage:
+            "Limited hardware detected — {model} is fastest on your CPU.",
+        },
+        { model: modelLabel },
+      );
+  }
+};
+
 const formatDownloadProgress = (
   snapshot: LocalSidecarDownloadSnapshot | undefined,
 ): string | null => {
@@ -148,6 +216,71 @@ export const AITranscriptionConfiguration = ({
     modelValue,
   );
   const showInlineModelDownloadAction = !modelSelectable;
+
+  // Hardware-aware recommendation, sourced entirely from the existing
+  // get_device_capability command + recommendTranscription() helper.
+  const [hardware, setHardware] = useState<{
+    cap: DeviceCapability;
+    rec: TranscriptionRecommendation;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void detectAndRecommend()
+      .then((result) => {
+        if (!cancelled) {
+          setHardware(result);
+        }
+      })
+      .catch((error) => {
+        getLogger().verbose(`Failed to detect hardware capability: ${error}`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const recommendedModel = hardware
+    ? normalizeLocalWhisperModel(hardware.rec.modelSize)
+    : null;
+
+  // First-run / never-chosen default: point the selection at the recommended
+  // model instead of the hardcoded DEFAULT_MODEL_SIZE ("tiny").
+  const rawModelSizePref = useAppStore(
+    (state) => state.userPrefs?.transcriptionModelSize ?? null,
+  );
+
+  useEffect(() => {
+    if (effectiveMode !== "local" || !recommendedModel || rawModelSizePref) {
+      return;
+    }
+    void setPreferredTranscriptionModelSize(recommendedModel);
+  }, [effectiveMode, recommendedModel, rawModelSizePref]);
+
+  // Gentle, non-blocking guardrail: only meaningful on CPU-only tiers, where
+  // recommendTranscription() has already picked the heaviest comfortable
+  // model. GPU tiers aren't guarded since the helper has no VRAM-per-model
+  // data to warn against.
+  const showGuardrailWarning =
+    effectiveMode === "local" &&
+    !!hardware &&
+    !hardware.cap.hasUsableGpu &&
+    !!recommendedModel &&
+    MODEL_WEIGHT[modelValue] !== undefined &&
+    MODEL_WEIGHT[recommendedModel] !== undefined &&
+    MODEL_WEIGHT[modelValue]! > MODEL_WEIGHT[recommendedModel]!;
+
+  const recommendedModelLabel = recommendedModel
+    ? shortModelLabel(
+        MODEL_OPTIONS.find((option) => option.value === recommendedModel)
+          ?.label ?? recommendedModel,
+      )
+    : null;
+
+  const hardwareHint =
+    hardware && recommendedModelLabel
+      ? getHardwareHint(intl, hardware.rec, hardware.cap, recommendedModelLabel)
+      : null;
 
   useEffect(() => {
     if (effectiveMode !== "local") {
@@ -381,9 +514,28 @@ export const AITranscriptionConfiguration = ({
                         sx={{ width: "100%" }}
                       >
                         <Box sx={{ minWidth: 0 }}>
-                          <Typography variant="body2" fontWeight={600}>
-                            {label}
-                          </Typography>
+                          <Stack
+                            direction="row"
+                            alignItems="center"
+                            spacing={0.75}
+                            flexWrap="wrap"
+                          >
+                            <Typography variant="body2" fontWeight={600}>
+                              {label}
+                            </Typography>
+                            {recommendedModel === value && (
+                              <Chip
+                                label={intl.formatMessage({
+                                  defaultMessage:
+                                    "Recommended for your hardware",
+                                })}
+                                size="small"
+                                color="success"
+                                variant="outlined"
+                                sx={{ height: 20, fontSize: 11 }}
+                              />
+                            )}
+                          </Stack>
                           <Typography
                             variant="caption"
                             color="text.secondary"
@@ -523,6 +675,21 @@ export const AITranscriptionConfiguration = ({
               </Box>
             )}
           </FormControl>
+
+          {hardwareHint && (
+            <Typography variant="caption" color="text.secondary">
+              {hardwareHint}
+            </Typography>
+          )}
+
+          {showGuardrailWarning && recommendedModelLabel && (
+            <Alert severity="warning" variant="outlined" sx={{ width: "100%" }}>
+              <FormattedMessage
+                defaultMessage="This model may be slow on your hardware; {recommended} is recommended."
+                values={{ recommended: recommendedModelLabel }}
+              />
+            </Alert>
+          )}
 
           {localTranscriptionConfig.modelStatusesLoading && (
             <Stack direction="row" spacing={1} alignItems="center">

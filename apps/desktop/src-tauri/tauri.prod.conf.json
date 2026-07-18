@@ -19,7 +19,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/voquill/voquill/releases/download/desktop-prod/latest.json"
+        "https://github.com/Miosa-osa/os-voice/releases/download/desktop-prod/latest.json"
       ]
     }
   }

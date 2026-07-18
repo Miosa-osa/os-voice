@@ -103,6 +103,49 @@ Teach OS Voice your world so it's always right:
 
 All run **locally** via Ollama. Heavier models give better structure at the cost of more VRAM/latency; smaller ones are instant. The cleanup is **faithful by design** — it reformats your words and never invents content. Requires a recent Ollama (`ollama --version` ≥ 0.30) to pull the newest models.
 
+## 💻 Hardware requirements
+
+OS Voice runs entirely on your own machine. Whisper transcription always runs locally; AI cleanup (Ollama) is optional and also fully local. Sizing depends on which Whisper model and which Ollama model you pick — see **Recommended models** above.
+
+Available Whisper models (download automatically on first use, from `huggingface.co/ggerganov/whisper.cpp`): `tiny`, `base`, `small`, `medium`, `large-v3` (`large`), `large-v3-turbo` (`large-turbo` — the recommended **Turbo** model).
+
+| Tier | Hardware | Whisper model | AI cleanup (Ollama) | Notes |
+|---|---|---|---|---|
+| **Low-end** | Any modern CPU | `tiny` / `base` | Off | Smallest, fastest-to-download models; slower transcription, fine for short bursts |
+| **Mid** | CPU, or entry-level GPU | `small` (CPU) / `medium` (GPU) | Optional — light model (`llama3.2:3b`, `qwen3.5:9b`) | Good balance of speed and accuracy |
+| **High** | Dedicated GPU (Vulkan/CUDA) or Apple Silicon | `large-v3-turbo` (**Turbo**) | Yes — `gemma4:12b` / `qwen2.5:14b` or bigger | **Turbo needs GPU acceleration** (Vulkan on Linux/Windows, CUDA, or Apple Silicon) to hit its "many× faster than real time" speed — on CPU-only it's much slower, like the other large models |
+| **Reference machine** | Mac Studio M3 Ultra, 96GB unified memory | `large-v3-turbo` | Yes — large local or Ollama cloud models | Enough headroom to run the top Whisper model and a large cleanup model at the same time with no compromises |
+
+Approximate guidance (exact figures vary by build/quantization — treat as ballpark, not a spec):
+- **Whisper models**: `tiny`/`base` are small downloads (tens of MB) and run comfortably on CPU; `small`/`medium` are roughly in the hundreds of MB up to ~1.5GB; `large-v3`/`large-v3-turbo` are roughly 1.5–3GB and benefit heavily from GPU acceleration. Each model is downloaded once and cached locally.
+- **Ollama cleanup models**: a 3B model like `llama3.2:3b` needs only a few GB of RAM/VRAM and responds almost instantly; `gemma4:12b`/`qwen2.5:14b`-class models need roughly 8–16GB of RAM/VRAM depending on quantization; bigger models need more. Apple Silicon uses unified memory (shared between CPU/GPU), so a high-RAM Apple Silicon Mac can run both Turbo transcription and a large local LLM at once.
+- **Disk**: budget a few GB if you try multiple Whisper models, plus a few GB per Ollama model you pull.
+
+## 📥 Installing (end users)
+
+Prebuilt installers are published to [GitHub Releases](https://github.com/Miosa-osa/os-voice/releases). Pick the package for your OS.
+
+**Linux** — `.deb`, `.rpm`, or a portable **AppImage**. The `.deb`/`.rpm` install these runtime dependencies automatically (install them manually if you use the AppImage):
+
+| Purpose | Debian/Ubuntu (`.deb`) | Fedora/openSUSE (`.rpm`) |
+|---|---|---|
+| Input injection (X11) | `libxdo3`, `xdotool` | `xdotool` |
+| GPU transcription (Vulkan) | `libvulkan1` | `vulkan-loader` |
+| Overlay pill (Wayland layer-shell) | `libgtk-layer-shell0` | `gtk-layer-shell` |
+| Wayland typing | `wtype` | `wtype` |
+
+**Windows** — `.msi` installer (bundles the WebView2 bootstrapper), or the NSIS `.exe` installer; a portable, no-admin `.exe` installer is also published.
+
+**macOS** — `.dmg` (drag-to-Applications, universal Apple Silicon + Intel binary) or `.pkg`. Requires macOS 13.3 (Ventura) or later.
+
+**After installing:**
+- **Whisper transcription models download automatically** the first time you select them in Settings → Transcription — no manual setup.
+- **AI cleanup is optional** and requires [Ollama](https://ollama.com) installed **separately**. Install Ollama, then pull a model (see **Recommended models** above), e.g.:
+  ```bash
+  ollama pull gemma4:12b
+  ```
+  Then enable it in Settings → AI Post-Processing.
+
 ## 🚀 Build & run (Linux)
 
 Requires **Node 18+**, **Rust**, and the system deps in `apps/desktop/scripts/setup-linux.sh` (plus `glslc` for the GPU build, and `ydotool`/`wtype` for Wayland typing).

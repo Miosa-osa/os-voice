@@ -223,7 +223,12 @@ export default function SettingsPage() {
   };
 
   const general = (
-    <Section title={<FormattedMessage defaultMessage="General" />}>
+    <Section
+      title={<FormattedMessage defaultMessage="General" />}
+      description={
+        <FormattedMessage defaultMessage="Startup, input devices, and everyday tools." />
+      }
+    >
       <ListTile
         title={<FormattedMessage defaultMessage="Start on system startup" />}
         leading={<RocketLaunchOutlined />}
@@ -451,23 +456,34 @@ export default function SettingsPage() {
 
   const dangerZone = (
     <Section
-      title={<FormattedMessage defaultMessage="Danger zone" />}
+      title={
+        <Box component="span" sx={{ color: "error.main" }}>
+          <FormattedMessage defaultMessage="Danger zone" />
+        </Box>
+      }
       description={
         <FormattedMessage defaultMessage="Be careful with these actions. They can have significant consequences for your account." />
       }
     >
       {!isSignedIn && (
         <ListTile
-          title={<FormattedMessage defaultMessage="Clear local data" />}
-          leading={<DeleteForeverOutlined />}
+          title={
+            <Box component="span" sx={{ color: "error.main", fontWeight: 600 }}>
+              <FormattedMessage defaultMessage="Clear local data" />
+            </Box>
+          }
+          leading={<DeleteForeverOutlined color="error" />}
           onClick={openClearLocalDataDialog}
         />
       )}
       {isSignedIn && (
         <ListTile
-          sx={{ mt: 1 }}
-          title={<FormattedMessage defaultMessage="Delete account" />}
-          leading={<PersonRemoveOutlined />}
+          title={
+            <Box component="span" sx={{ color: "error.main", fontWeight: 600 }}>
+              <FormattedMessage defaultMessage="Delete account" />
+            </Box>
+          }
+          leading={<PersonRemoveOutlined color="error" />}
           onClick={openDeleteAccountDialog}
         />
       )}
@@ -477,7 +493,7 @@ export default function SettingsPage() {
   return (
     <DashboardEntryLayout>
       <Stack direction="column">
-        <Typography variant="h4" fontWeight={700} sx={{ marginBottom: 4 }}>
+        <Typography variant="h4" fontWeight={700} sx={{ mb: 4 }}>
           <FormattedMessage defaultMessage="Settings" />
         </Typography>
         {general}
