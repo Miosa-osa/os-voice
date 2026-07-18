@@ -250,10 +250,17 @@ export const YourUsageTab = () => {
         elevation={0}
         sx={{
           "&:before": { display: "none" },
+          // Neutralize the theme's `Mui-expanded { margin: auto }` which shifts
+          // the panel and overlaps neighbors on open.
+          "&.Mui-expanded": { margin: 0 },
           border: 1,
           borderColor: "divider",
           borderRadius: 2,
           overflow: "hidden",
+          // Transparent so the level1 Section cards inside stand out instead of
+          // blending into the accordion's own level1 surface.
+          bgcolor: "transparent",
+          backgroundImage: "none",
         }}
       >
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
@@ -261,7 +268,9 @@ export const YourUsageTab = () => {
             <FormattedMessage defaultMessage="Detailed stats" />
           </Typography>
         </AccordionSummary>
-        <AccordionDetails>
+        {/* Reset color to primary — the theme muted all AccordionDetails text to
+            text.secondary — and give consistent padding so nothing crowds. */}
+        <AccordionDetails sx={{ color: "text.primary", px: 2, pt: 1, pb: 2.5 }}>
           <Stack spacing={3}>
             <Section title={<FormattedMessage defaultMessage="Overview" />}>
               <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>

@@ -358,10 +358,13 @@ const DailyTimelineItem = ({
     elevation={0}
     sx={{
       "&:before": { display: "none" },
+      "&.Mui-expanded": { margin: 0 },
       border: 1,
       borderColor: "divider",
       borderRadius: 2,
       overflow: "hidden",
+      bgcolor: "transparent",
+      backgroundImage: "none",
     }}
   >
     <AccordionSummary expandIcon={<ExpandMoreIcon />}>
@@ -383,7 +386,7 @@ const DailyTimelineItem = ({
         )}
       </Stack>
     </AccordionSummary>
-    <AccordionDetails>
+    <AccordionDetails sx={{ color: "text.primary", px: 2, pt: 1, pb: 2 }}>
       <Stack spacing={1.5}>
         {daily.focus.length > 0 && <ChipRow items={daily.focus} />}
         {daily.notable && (
@@ -1185,10 +1188,13 @@ export const YourVoiceTab = () => {
         elevation={0}
         sx={{
           "&:before": { display: "none" },
+          "&.Mui-expanded": { margin: 0 },
           border: 1,
           borderColor: "divider",
           borderRadius: 2,
           overflow: "hidden",
+          bgcolor: "transparent",
+          backgroundImage: "none",
         }}
       >
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
@@ -1196,7 +1202,7 @@ export const YourVoiceTab = () => {
             <FormattedMessage defaultMessage="More about you" />
           </Typography>
         </AccordionSummary>
-        <AccordionDetails>
+        <AccordionDetails sx={{ color: "text.primary", px: 2, pt: 1, pb: 2.5 }}>
           <Stack spacing={3}>
             {totalWords >= SIGNATURE_UNLOCK_WORDS ? (
               <Section title={<FormattedMessage defaultMessage="Signature" />}>
