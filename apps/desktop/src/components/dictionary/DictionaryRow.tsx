@@ -53,7 +53,8 @@ export type DictionaryRowProps = {
 export const DictionaryRow = ({ id }: DictionaryRowProps) => {
   const intl = useIntl();
   const term = useAppStore((state) => getRec(state.termById, id)) as
-    DefinableTerm | undefined;
+    | DefinableTerm
+    | undefined;
   const [sourceValue, setSourceValue] = useState(term?.sourceValue ?? "");
   const [destinationValue, setDestinationValue] = useState(
     term?.destinationValue ?? "",

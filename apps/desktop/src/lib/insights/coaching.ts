@@ -4,7 +4,10 @@
 import { WordAnalysis } from "./compute";
 
 export type ScoreDimensionKey =
-  "filler" | "sentenceLength" | "vocabulary" | "questionRatio";
+  | "filler"
+  | "sentenceLength"
+  | "vocabulary"
+  | "questionRatio";
 
 export type ScoreDimension = {
   key: ScoreDimensionKey;
