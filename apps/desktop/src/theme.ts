@@ -64,26 +64,6 @@ export const theme = createTheme({
       '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", system-ui, sans-serif',
     pxToRem: (px: number) => `${px / 16}rem`,
 
-    displayLarge: { fontSize: 57, lineHeight: 1, fontWeight: 400 },
-    displayMedium: { fontSize: 45, lineHeight: 1, fontWeight: 400 },
-    displaySmall: { fontSize: 36, lineHeight: 1, fontWeight: 400 },
-
-    headlineLarge: { fontSize: 32, lineHeight: 1, fontWeight: 400 },
-    headlineMedium: { fontSize: 28, lineHeight: 1, fontWeight: 400 },
-    headlineSmall: { fontSize: 24, lineHeight: 1, fontWeight: 400 },
-
-    titleLarge: { fontSize: 24, lineHeight: 1, fontWeight: 400 },
-    titleMedium: { fontSize: 18, lineHeight: 1, fontWeight: 500 },
-    titleSmall: { fontSize: 16, lineHeight: 1, fontWeight: 500 },
-
-    bodyLarge: { fontSize: 18, lineHeight: 1, fontWeight: 400 },
-    bodyMedium: { fontSize: 16, lineHeight: 1, fontWeight: 400 },
-    bodySmall: { fontSize: 14, lineHeight: 1, fontWeight: 400 },
-
-    labelLarge: { fontSize: 16, lineHeight: 1, fontWeight: 500 },
-    labelMedium: { fontSize: 14, lineHeight: 1, fontWeight: 500 },
-    labelSmall: { fontSize: 13, lineHeight: 1, fontWeight: 500 },
-
     body1: { fontSize: 16, lineHeight: 1.5, fontWeight: 400 },
     body2: { fontSize: 14, lineHeight: 1.5, fontWeight: 400 },
   },

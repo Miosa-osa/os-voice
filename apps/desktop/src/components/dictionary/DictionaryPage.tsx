@@ -4,6 +4,7 @@ import BookmarkAddOutlinedIcon from "@mui/icons-material/BookmarkAddOutlined";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
+import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
 import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
 import HelpOutlineRoundedIcon from "@mui/icons-material/HelpOutlineRounded";
 import {
@@ -14,6 +15,7 @@ import {
   Menu,
   MenuItem,
   Stack,
+  TextField,
   Tooltip,
   Typography,
 } from "@mui/material";
@@ -31,6 +33,7 @@ import {
   dismissLearnedWord,
   refreshLearnedVocabulary,
   syncUbiquitousLanguage,
+  updateLearnedWord,
 } from "../../actions/vocab.actions";
 import { useAsyncEffect } from "../../hooks/async.hooks";
 import { CATEGORY_ORDER, WordCategory } from "../../lib/vocab/categorize";
@@ -419,6 +422,7 @@ export default function DictionaryPage() {
               onDismiss={dismissLearnedWord}
               onPromote={handlePromote}
               onConfirm={confirmLearnedWord}
+              onEdit={updateLearnedWord}
             />
           );
         case "learned":
@@ -428,6 +432,7 @@ export default function DictionaryPage() {
               onDismiss={dismissLearnedWord}
               onPromote={handlePromote}
               onConfirm={confirmLearnedWord}
+              onEdit={updateLearnedWord}
             />
           );
         default:
@@ -555,15 +560,102 @@ function LearnedWordRow({
   onPromote,
   onConfirm,
   highlight,
+  onEdit,
 }: {
   word: LearnedWord;
   onDismiss: (word: string) => void;
   onPromote: (word: string) => void;
   onConfirm: (word: string) => void;
+  onEdit: (
+    original: string,
+    patch: { word?: string; definition?: string; category?: WordCategory },
+  ) => void;
   highlight?: boolean;
 }) {
   const intl = useIntl();
   const status = verificationStatusOf(word);
+  const [editing, setEditing] = useState(false);
+  const [draftWord, setDraftWord] = useState(word.word);
+  const [draftDef, setDraftDef] = useState(word.definition ?? "");
+  const [draftCategory, setDraftCategory] = useState<WordCategory | "">(
+    word.category ?? "",
+  );
+
+  const handleSave = () => {
+    if (!draftWord.trim()) return;
+    onEdit(word.word, {
+      word: draftWord,
+      definition: draftDef,
+      category: draftCategory || undefined,
+    });
+    setEditing(false);
+  };
+  const handleCancel = () => {
+    setDraftWord(word.word);
+    setDraftDef(word.definition ?? "");
+    setDraftCategory(word.category ?? "");
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <Stack spacing={1.25} py={1.25} px={highlight ? 1.5 : 0}>
+        <TextField
+          size="small"
+          fullWidth
+          label={intl.formatMessage({ defaultMessage: "Word or term" })}
+          value={draftWord}
+          onChange={(e) => setDraftWord(e.target.value)}
+          error={!draftWord.trim()}
+        />
+        <TextField
+          size="small"
+          fullWidth
+          multiline
+          minRows={2}
+          label={intl.formatMessage({ defaultMessage: "Definition" })}
+          placeholder={intl.formatMessage({
+            defaultMessage: "What this means in your own words…",
+          })}
+          value={draftDef}
+          onChange={(e) => setDraftDef(e.target.value)}
+        />
+        <TextField
+          size="small"
+          select
+          fullWidth
+          label={intl.formatMessage({ defaultMessage: "Category" })}
+          value={draftCategory}
+          onChange={(e) =>
+            setDraftCategory(e.target.value as WordCategory | "")
+          }
+        >
+          <MenuItem value="">
+            <FormattedMessage defaultMessage="Auto" />
+          </MenuItem>
+          {CATEGORY_ORDER.map((cat) => (
+            <MenuItem key={cat} value={cat}>
+              <CategoryLabel category={cat} />
+            </MenuItem>
+          ))}
+        </TextField>
+        <Stack direction="row" spacing={1} justifyContent="flex-end">
+          <Button size="small" onClick={handleCancel}>
+            <FormattedMessage defaultMessage="Cancel" />
+          </Button>
+          <Button
+            size="small"
+            variant="blue"
+            onClick={handleSave}
+            disabled={!draftWord.trim()}
+          >
+            <FormattedMessage defaultMessage="Save" />
+          </Button>
+        </Stack>
+      </Stack>
+    );
+  }
+
   return (
     <Stack
       direction="row"
@@ -674,6 +766,23 @@ function LearnedWordRow({
           </IconButton>
         </Tooltip>
       )}
+      <Tooltip
+        disableInteractive
+        title={
+          <FormattedMessage defaultMessage="Edit — fix the word or definition" />
+        }
+      >
+        <IconButton
+          size="small"
+          aria-label={intl.formatMessage(
+            { defaultMessage: "Edit {word}" },
+            { word: word.word },
+          )}
+          onClick={() => setEditing(true)}
+        >
+          <EditOutlinedIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
       <Tooltip
         disableInteractive
         title={<FormattedMessage defaultMessage="Add to your dictionary" />}

@@ -4,6 +4,7 @@ import {
   Card,
   CardContent,
   Chip,
+  Divider,
   Stack,
   Tooltip,
   Typography,
@@ -21,12 +22,16 @@ import {
 } from "../../utils/user.utils";
 import { DictationInstruction } from "../common/DictationInstruction";
 import { DashboardEntryLayout } from "../dashboard/DashboardEntryLayout";
-import { TranscriptionRow } from "../transcriptions/TranscriptRow";
 import { GettingStartedList } from "./GettingStartedList";
 import { HomeSideEffects } from "./HomeSideEffects";
 import { OutOfWordsCard } from "./OutOfWordsCard";
+import { TodayStrip } from "./TodayStrip";
+import { TranscriptPreviewRow } from "./TranscriptPreviewRow";
 import { TrialExtensionCard } from "./TrialExtensionCard";
 
+// Canonical flat-card stat: muted label on top, bold value below — matches
+// the theme's default flat Card (level1 bg, level2 border, 15px radius) used
+// everywhere else, e.g. insights/StatCard.
 function StatCard({
   value,
   label,
@@ -38,16 +43,18 @@ function StatCard({
 }) {
   return (
     <Card sx={{ flex: 1 }}>
-      <CardContent sx={{ py: 2, px: 2.5, "&:last-child": { pb: 2 } }}>
-        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-          {icon}
-          <Typography variant="h5" fontWeight={700}>
-            {value}
+      <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
+        <Stack spacing={0.5}>
+          <Typography variant="body2" color="text.secondary">
+            {label}
           </Typography>
+          <Stack direction="row" alignItems="center" spacing={0.75}>
+            {icon}
+            <Typography variant="h5" fontWeight={700}>
+              {value}
+            </Typography>
+          </Stack>
         </Stack>
-        <Typography variant="body2" color="text.secondary">
-          {label}
-        </Typography>
       </CardContent>
     </Card>
   );
@@ -91,6 +98,9 @@ export default function HomePage() {
             />
           </Typography>
           <DictationInstruction />
+          <Box sx={{ mt: 1.5 }}>
+            <TodayStrip />
+          </Box>
         </Box>
 
         <TrialExtensionCard />
@@ -132,7 +142,7 @@ export default function HomePage() {
               placement="bottom"
             >
               <Card sx={{ cursor: "default" }}>
-                <CardContent sx={{ py: 2, px: 2.5, "&:last-child": { pb: 2 } }}>
+                <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
                   <Stack direction="row" alignItems="baseline" spacing={1.5}>
                     <Typography variant="h5" fontWeight={700}>
                       <FormattedMessage
@@ -163,9 +173,11 @@ export default function HomePage() {
           </Typography>
           {topIds.length > 0 ? (
             <>
-              {topIds.map((id) => (
-                <TranscriptionRow key={id} id={id} />
-              ))}
+              <Stack divider={<Divider />}>
+                {topIds.map((id) => (
+                  <TranscriptPreviewRow key={id} id={id} />
+                ))}
+              </Stack>
               <Box sx={{ display: "flex", justifyContent: "center", mt: 1.5 }}>
                 <Chip
                   label={<FormattedMessage defaultMessage="View all" />}

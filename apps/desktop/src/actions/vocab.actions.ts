@@ -301,6 +301,31 @@ export const confirmLearnedWord = (word: string): void => {
   });
 };
 
+// User-curated correction of an analyzed word. The AI gets some wrong, so let the
+// user fix the word text, its definition, or its category and save it. Edited
+// entries are marked verified so enrichment never second-guesses or overwrites
+// the user's correction again.
+export const updateLearnedWord = (
+  original: string,
+  patch: { word?: string; definition?: string; category?: WordCategory },
+): void => {
+  const key = original.toLowerCase();
+  produceAppState((draft) => {
+    const list = draft.local.learnedVocab ?? [];
+    const target = list.find((w) => w.word.toLowerCase() === key);
+    if (!target) return;
+    const nextWord = patch.word?.trim();
+    if (nextWord) target.word = nextWord;
+    if (patch.definition !== undefined) {
+      target.definition = patch.definition.trim() || undefined;
+    }
+    if (patch.category) target.category = patch.category;
+    target.verified = true;
+    target.isTerm = true;
+    draft.vocab.learnedWords = list.map((w) => w.word);
+  });
+};
+
 // Remove a learned word and remember the choice so it never comes back.
 export const dismissLearnedWord = (word: string): void => {
   const key = word.toLowerCase();

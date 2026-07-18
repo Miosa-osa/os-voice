@@ -129,18 +129,23 @@ export const ShareCard = () => {
               <FormattedMessage defaultMessage="Top achievements" />
             </Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-              {topAchievements.map((a) => (
-                <Chip
-                  key={a.key}
-                  size="small"
-                  variant="outlined"
-                  label={`${a.emoji ?? "🏆"} ${a.label}`}
-                  sx={{
-                    borderColor: TIER_COLORS[a.tier ?? "bronze"],
-                    color: TIER_COLORS[a.tier ?? "bronze"],
-                  }}
-                />
-              ))}
+              {topAchievements.map((a) => {
+                const color = TIER_COLORS[a.tier ?? "bronze"];
+                return (
+                  <Chip
+                    key={a.key}
+                    size="small"
+                    variant="outlined"
+                    label={`${a.emoji ?? "🏆"} ${a.label}`}
+                    sx={{
+                      borderColor: alpha(color, 0.45),
+                      bgcolor: alpha(color, 0.1),
+                      color,
+                      fontWeight: 600,
+                    }}
+                  />
+                );
+              })}
             </Stack>
           </Box>
         )}
@@ -148,7 +153,8 @@ export const ShareCard = () => {
         <Typography
           variant="caption"
           color="textSecondary"
-          sx={{ textAlign: "right", opacity: 0.6 }}
+          fontWeight={700}
+          sx={{ textAlign: "right", opacity: 0.6, letterSpacing: 0.5 }}
         >
           OS Voice
         </Typography>
