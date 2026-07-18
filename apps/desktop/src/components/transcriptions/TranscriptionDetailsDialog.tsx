@@ -372,6 +372,44 @@ export const TranscriptionDetailsDialog = () => {
                           theme.palette.background.default,
                       })}
                     >
+                      {review.assessment && (
+                        <Typography
+                          variant="body2"
+                          fontWeight={700}
+                          sx={{ mb: 1 }}
+                        >
+                          {review.assessment}
+                        </Typography>
+                      )}
+                      {review.tips && review.tips.length > 0 && (
+                        <>
+                          <Typography variant="overline" color="text.secondary">
+                            <FormattedMessage defaultMessage="Fix these" />
+                          </Typography>
+                          <Stack spacing={0.5} sx={{ mb: 1, mt: 0.5 }}>
+                            {review.tips.map((tip, index) => (
+                              <Stack
+                                key={`review-tip-${index}`}
+                                direction="row"
+                                spacing={1}
+                                alignItems="flex-start"
+                              >
+                                <Box
+                                  sx={{
+                                    mt: "7px",
+                                    width: 6,
+                                    height: 6,
+                                    borderRadius: "50%",
+                                    bgcolor: "primary.main",
+                                    flexShrink: 0,
+                                  }}
+                                />
+                                <Typography variant="body2">{tip}</Typography>
+                              </Stack>
+                            ))}
+                          </Stack>
+                        </>
+                      )}
                       {review.critique && (
                         <>
                           <Typography variant="overline" color="text.secondary">

@@ -12,6 +12,8 @@ import {
 import { alpha, useTheme } from "@mui/material/styles";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import BoltRoundedIcon from "@mui/icons-material/BoltRounded";
+import FitnessCenterRoundedIcon from "@mui/icons-material/FitnessCenterRounded";
+import FlagRoundedIcon from "@mui/icons-material/FlagRounded";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import TrendingDownIcon from "@mui/icons-material/TrendingDown";
@@ -32,6 +34,12 @@ import {
   milestoneFor,
   nextMilestoneWords,
 } from "../../lib/insights/compute";
+import {
+  computeCoachingDrills,
+  computeCommunicationScore,
+  computeFocusThisWeek,
+  gradeColor,
+} from "../../lib/insights/coaching";
 import { generateVoiceProfile } from "../../actions/insights.actions";
 import { useAppStore } from "../../store";
 import { InsightsEmpty } from "./InsightsEmpty";
@@ -95,6 +103,54 @@ const CoachingGroup = ({
     </Typography>
     <Box sx={{ mt: 0.5 }}>
       <BulletList items={items} color={color} />
+    </Box>
+  </Box>
+);
+
+const CommunicationScoreGauge = ({
+  score,
+  grade,
+  color,
+}: {
+  score: number;
+  grade: string;
+  color: "success" | "info" | "warning" | "error";
+}) => (
+  <Box sx={{ position: "relative", display: "inline-flex" }}>
+    <CircularProgress
+      variant="determinate"
+      value={100}
+      size={88}
+      thickness={4}
+      sx={{ color: (theme) => alpha(theme.palette.text.primary, 0.08) }}
+    />
+    <CircularProgress
+      variant="determinate"
+      value={score}
+      size={88}
+      thickness={4}
+      color={color}
+      sx={{ position: "absolute", left: 0 }}
+    />
+    <Box
+      sx={{
+        top: 0,
+        left: 0,
+        bottom: 0,
+        right: 0,
+        position: "absolute",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Typography variant="h6" fontWeight={700} sx={{ lineHeight: 1 }}>
+        {grade}
+      </Typography>
+      <Typography variant="caption" color="textSecondary">
+        {score}/100
+      </Typography>
     </Box>
   </Box>
 );
@@ -184,6 +240,15 @@ export const YourVoiceTab = () => {
     () => computeRecentDictationsSummary(transcriptions, 20),
     [transcriptions],
   );
+  const communicationScore = useMemo(
+    () => computeCommunicationScore(words),
+    [words],
+  );
+  const focusThisWeek = useMemo(
+    () => computeFocusThisWeek(words, communicationScore),
+    [words, communicationScore],
+  );
+  const coachingDrills = useMemo(() => computeCoachingDrills(words), [words]);
 
   useEffect(() => {
     if (totalWords >= PROFILE_UNLOCK_WORDS) {
@@ -547,6 +612,85 @@ export const YourVoiceTab = () => {
             }
           >
             <Stack spacing={2}>
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                spacing={2.5}
+                alignItems={{ xs: "flex-start", sm: "center" }}
+                sx={{
+                  p: 2,
+                  borderRadius: 2,
+                  border: 1,
+                  borderColor: "divider",
+                }}
+              >
+                <CommunicationScoreGauge
+                  score={communicationScore.score}
+                  grade={communicationScore.grade}
+                  color={gradeColor(communicationScore.grade)}
+                />
+                <Stack spacing={0.75} sx={{ flex: 1 }}>
+                  <Typography variant="subtitle1" fontWeight={700}>
+                    <FormattedMessage defaultMessage="Communication score" />
+                  </Typography>
+                  {communicationScore.lift && (
+                    <Stack direction="row" spacing={1} alignItems="flex-start">
+                      <TrendingUpIcon
+                        fontSize="small"
+                        color="success"
+                        sx={{ mt: "1px" }}
+                      />
+                      <Typography variant="body2" color="textSecondary">
+                        {communicationScore.lift}
+                      </Typography>
+                    </Stack>
+                  )}
+                  {communicationScore.drag && (
+                    <Stack direction="row" spacing={1} alignItems="flex-start">
+                      <TrendingDownIcon
+                        fontSize="small"
+                        color="warning"
+                        sx={{ mt: "1px" }}
+                      />
+                      <Typography variant="body2" color="textSecondary">
+                        {communicationScore.drag}
+                      </Typography>
+                    </Stack>
+                  )}
+                </Stack>
+              </Stack>
+
+              {focusThisWeek && (
+                <Box
+                  sx={{
+                    p: 2,
+                    borderRadius: 2,
+                    border: 1,
+                    borderColor: alpha(theme.palette.primary.main, 0.3),
+                    background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.1)}, ${alpha(theme.palette.primary.main, 0.02)})`,
+                  }}
+                >
+                  <Stack direction="row" spacing={1.5} alignItems="flex-start">
+                    <FlagRoundedIcon color="primary" sx={{ mt: "2px" }} />
+                    <Stack spacing={0.5}>
+                      <Typography
+                        variant="overline"
+                        color="primary"
+                        fontWeight={700}
+                        sx={{ lineHeight: 1.2 }}
+                      >
+                        <FormattedMessage defaultMessage="Focus this week" />
+                      </Typography>
+                      <Typography variant="body1" fontWeight={600}>
+                        {focusThisWeek.title}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        {focusThisWeek.detail}
+                      </Typography>
+                    </Stack>
+                  </Stack>
+                </Box>
+              )}
+
               {hasTrend && coachingTrend && (
                 <Box>
                   <Typography
@@ -623,6 +767,42 @@ export const YourVoiceTab = () => {
                     items={aiProfile.coaching.suggestions}
                   />
                 )}
+
+              {coachingDrills.length > 0 && (
+                <Box>
+                  <Typography
+                    variant="overline"
+                    sx={{
+                      color: "secondary.main",
+                      display: "block",
+                      fontWeight: 700,
+                    }}
+                  >
+                    <FormattedMessage defaultMessage="Drills to practice" />
+                  </Typography>
+                  <Stack spacing={1.5} sx={{ mt: 0.5 }}>
+                    {coachingDrills.map((drill) => (
+                      <Box key={drill.area}>
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          alignItems="center"
+                          sx={{ mb: 0.5 }}
+                        >
+                          <FitnessCenterRoundedIcon
+                            fontSize="small"
+                            color="secondary"
+                          />
+                          <Typography variant="body2" fontWeight={700}>
+                            {drill.area}
+                          </Typography>
+                        </Stack>
+                        <BulletList items={drill.tips} color="secondary.main" />
+                      </Box>
+                    ))}
+                  </Stack>
+                </Box>
+              )}
 
               {recentSummary && (
                 <Box>

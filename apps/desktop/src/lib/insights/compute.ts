@@ -1926,3 +1926,403 @@ export const computeDayDetail = (
     topApp: topEntry(appWords),
   };
 };
+
+// ---------------------------------------------------------------------------
+// Deeper "Your usage" analysis: rhythm/consistency, session shape, week over
+// week momentum, editing efficiency, and richer milestone projections. These
+// are additive read-only views over events/transcriptions and don't change
+// any of the stats consumed by the coaching/profile side of insights.
+// ---------------------------------------------------------------------------
+
+export type Chronotype = "morning" | "afternoon" | "evening" | "night";
+
+export type Rhythm = {
+  /** Words dictated per weekday, index 0 = Sunday .. 6 = Saturday. */
+  weekdayBars: number[];
+  /** Words dictated per hour of day, index 0-23. */
+  hourBars: number[];
+  peakWeekdayLabel: string | null;
+  peakHourLabel: string | null;
+  chronotype: Chronotype | null;
+  /** 0-100: how evenly spread out (vs. bursty) your dictation habit is. */
+  consistencyScore: number;
+};
+
+export const computeRhythm = (transcriptions: Transcription[]): Rhythm => {
+  const active = activeTranscriptions(transcriptions);
+  const weekdayBars = Array.from({ length: 7 }, () => 0);
+  const hourBars = Array.from({ length: 24 }, () => 0);
+  const byDay = new Map<string, number>();
+
+  for (const t of active) {
+    const d = dayjs(t.createdAt);
+    const words = transcriptWords(t);
+    weekdayBars[d.day()] += words;
+    hourBars[d.hour()] += words;
+    const key = d.format("YYYY-MM-DD");
+    byDay.set(key, (byDay.get(key) ?? 0) + words);
+  }
+
+  const hasActivity = active.length > 0;
+  const peakWeekdayIdx = weekdayBars.reduce(
+    (best, v, i) => (v > weekdayBars[best] ? i : best),
+    0,
+  );
+  const peakHourIdx = hourBars.reduce(
+    (best, v, i) => (v > hourBars[best] ? i : best),
+    0,
+  );
+  const peakWeekdayLabel = hasActivity ? WEEKDAYS[peakWeekdayIdx] : null;
+  const peakHourLabel = hasActivity ? hourLabel(peakHourIdx) : null;
+
+  let chronotype: Chronotype | null = null;
+  if (hasActivity) {
+    if (peakHourIdx >= 5 && peakHourIdx < 12) chronotype = "morning";
+    else if (peakHourIdx >= 12 && peakHourIdx < 17) chronotype = "afternoon";
+    else if (peakHourIdx >= 17 && peakHourIdx < 22) chronotype = "evening";
+    else chronotype = "night";
+  }
+
+  // Consistency blends two signals over a rolling window (capped to how long
+  // the user has actually been dictating): how many days they show up
+  // (spread) and how even their daily output is when they do (evenness).
+  const WINDOW_DAYS = 60;
+  let firstDay: dayjs.Dayjs | null = null;
+  for (const t of active) {
+    const d = dayjs(t.createdAt);
+    if (!firstDay || d.isBefore(firstDay)) firstDay = d;
+  }
+  const cutoff = dayjs()
+    .subtract(WINDOW_DAYS - 1, "day")
+    .startOf("day");
+  const windowStart =
+    firstDay && firstDay.isAfter(cutoff) ? firstDay.startOf("day") : cutoff;
+  const windowDays = Math.max(1, dayjs().diff(windowStart, "day") + 1);
+
+  const dailyCounts: number[] = [];
+  for (let i = 0; i < windowDays; i++) {
+    const key = windowStart.add(i, "day").format("YYYY-MM-DD");
+    dailyCounts.push(byDay.get(key) ?? 0);
+  }
+  const activeDaysInWindow = dailyCounts.filter((v) => v > 0).length;
+  const spread = activeDaysInWindow / windowDays;
+
+  const activeCounts = dailyCounts.filter((v) => v > 0);
+  let evenness = 0;
+  if (activeCounts.length > 0) {
+    const mean = activeCounts.reduce((a, b) => a + b, 0) / activeCounts.length;
+    const variance =
+      activeCounts.reduce((a, b) => a + (b - mean) ** 2, 0) /
+      activeCounts.length;
+    const cv = mean > 0 ? Math.sqrt(variance) / mean : 0;
+    evenness = Math.max(0, 1 - Math.min(1, cv));
+  }
+  const consistencyScore = hasActivity
+    ? Math.round(((spread + evenness) / 2) * 100)
+    : 0;
+
+  return {
+    weekdayBars,
+    hourBars,
+    peakWeekdayLabel,
+    peakHourLabel,
+    chronotype,
+    consistencyScore,
+  };
+};
+
+export type SessionStats = {
+  avgWordsPerSession: number;
+  medianWordsPerSession: number;
+  longestSessionWords: number;
+  longestSessionDate: string | null;
+  sessionsPerActiveDay: number;
+  wordsPerSessionWeekly: TrendPoint[];
+};
+
+export const computeSessionStats = (
+  transcriptions: Transcription[],
+): SessionStats => {
+  const active = activeTranscriptions(transcriptions);
+  if (active.length === 0) {
+    return {
+      avgWordsPerSession: 0,
+      medianWordsPerSession: 0,
+      longestSessionWords: 0,
+      longestSessionDate: null,
+      sessionsPerActiveDay: 0,
+      wordsPerSessionWeekly: [],
+    };
+  }
+
+  const wordCounts = active.map(transcriptWords);
+  const totalWords = wordCounts.reduce((a, b) => a + b, 0);
+  const avgWordsPerSession = Math.round(totalWords / active.length);
+
+  const sorted = [...wordCounts].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const medianWordsPerSession =
+    sorted.length % 2 === 0
+      ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+      : sorted[mid];
+
+  let longestSessionWords = 0;
+  let longestSessionDate: string | null = null;
+  const activeDays = new Set<string>();
+  for (const t of active) {
+    const words = transcriptWords(t);
+    activeDays.add(dayjs(t.createdAt).format("YYYY-MM-DD"));
+    if (words > longestSessionWords) {
+      longestSessionWords = words;
+      longestSessionDate = dayjs(t.createdAt).format("YYYY-MM-DD");
+    }
+  }
+  const sessionsPerActiveDay =
+    activeDays.size > 0
+      ? Math.round((active.length / activeDays.size) * 10) / 10
+      : 0;
+
+  const WEEKS = 8;
+  const now = dayjs();
+  const wordsPerSessionWeekly: TrendPoint[] = [];
+  for (let i = WEEKS - 1; i >= 0; i--) {
+    const start = now.subtract(i, "week").startOf("week");
+    const end = start.add(1, "week");
+    let words = 0;
+    let count = 0;
+    for (const t of active) {
+      const d = dayjs(t.createdAt);
+      if (d.isBefore(start) || !d.isBefore(end)) continue;
+      words += transcriptWords(t);
+      count += 1;
+    }
+    wordsPerSessionWeekly.push({
+      label: start.format("MMM D"),
+      value: count > 0 ? Math.round(words / count) : 0,
+    });
+  }
+
+  return {
+    avgWordsPerSession,
+    medianWordsPerSession,
+    longestSessionWords,
+    longestSessionDate,
+    sessionsPerActiveDay,
+    wordsPerSessionWeekly,
+  };
+};
+
+export type WeekComparison = {
+  wordsThisWeek: number;
+  wordsLastWeek: number;
+  /** null when there's no prior week to compare against. */
+  wordsDeltaPct: number | null;
+  wpmThisWeek: number;
+  wpmLastWeek: number;
+  wpmDeltaPct: number | null;
+  activeDaysThisWeek: number;
+  activeDaysLastWeek: number;
+  activeDaysDelta: number;
+  personalBestWeekWords: number;
+  /** This week's words as a % of your all-time best week. */
+  paceVsBestWeekPct: number | null;
+};
+
+export const computeWeekComparison = (
+  transcriptions: Transcription[],
+): WeekComparison => {
+  const active = activeTranscriptions(transcriptions);
+  const thisWeekStart = dayjs().startOf("week");
+  const lastWeekStart = thisWeekStart.subtract(1, "week");
+
+  let wordsThisWeek = 0;
+  let msThisWeek = 0;
+  let wordsLastWeek = 0;
+  let msLastWeek = 0;
+  const daysThisWeek = new Set<string>();
+  const daysLastWeek = new Set<string>();
+  const weekTotals = new Map<string, number>();
+
+  for (const t of active) {
+    const d = dayjs(t.createdAt);
+    const words = transcriptWords(t);
+    const weekKey = d.startOf("week").format("YYYY-MM-DD");
+    weekTotals.set(weekKey, (weekTotals.get(weekKey) ?? 0) + words);
+
+    if (!d.isBefore(thisWeekStart)) {
+      wordsThisWeek += words;
+      msThisWeek += audioMs(t);
+      daysThisWeek.add(d.format("YYYY-MM-DD"));
+    } else if (!d.isBefore(lastWeekStart)) {
+      wordsLastWeek += words;
+      msLastWeek += audioMs(t);
+      daysLastWeek.add(d.format("YYYY-MM-DD"));
+    }
+  }
+
+  const minsThisWeek = msThisWeek / 60000;
+  const minsLastWeek = msLastWeek / 60000;
+  const wpmThisWeek =
+    minsThisWeek > 0 ? Math.round(wordsThisWeek / minsThisWeek) : 0;
+  const wpmLastWeek =
+    minsLastWeek > 0 ? Math.round(wordsLastWeek / minsLastWeek) : 0;
+
+  const wordsDeltaPct =
+    wordsLastWeek > 0
+      ? Math.round(((wordsThisWeek - wordsLastWeek) / wordsLastWeek) * 100)
+      : null;
+  const wpmDeltaPct =
+    wpmLastWeek > 0
+      ? Math.round(((wpmThisWeek - wpmLastWeek) / wpmLastWeek) * 100)
+      : null;
+
+  const personalBestWeekWords = Math.max(0, ...Array.from(weekTotals.values()));
+  const paceVsBestWeekPct =
+    personalBestWeekWords > 0
+      ? Math.round((wordsThisWeek / personalBestWeekWords) * 100)
+      : null;
+
+  return {
+    wordsThisWeek,
+    wordsLastWeek,
+    wordsDeltaPct,
+    wpmThisWeek,
+    wpmLastWeek,
+    wpmDeltaPct,
+    activeDaysThisWeek: daysThisWeek.size,
+    activeDaysLastWeek: daysLastWeek.size,
+    activeDaysDelta: daysThisWeek.size - daysLastWeek.size,
+    personalBestWeekWords,
+    paceVsBestWeekPct,
+  };
+};
+
+export type Efficiency = {
+  /** Corrections per 100 words, one point per week. */
+  correctionRateWeekly: TrendPoint[];
+  /** Negative = fewer corrections needed than last week (improving). */
+  correctionRateDeltaPct: number | null;
+  verbatimWords: number;
+  polishedWords: number;
+  /** 0-100 share of words dictated with post-processing off (verbatim). */
+  verbatimPct: number;
+  /** Words transcribed per second of processing time, one point per week. */
+  speedWeekly: TrendPoint[];
+};
+
+export const computeEfficiency = (
+  events: LocalDictationEvent[],
+  transcriptions: Transcription[],
+): Efficiency => {
+  const WEEKS = 8;
+  const now = dayjs();
+  const correctionRateWeekly: TrendPoint[] = [];
+  const speedWeekly: TrendPoint[] = [];
+
+  for (let i = WEEKS - 1; i >= 0; i--) {
+    const start = now.subtract(i, "week").startOf("week");
+    const end = start.add(1, "week");
+    let words = 0;
+    let corrections = 0;
+    let speedWords = 0;
+    let speedMs = 0;
+    for (const e of events) {
+      const d = dayjs(e.timestamp);
+      if (d.isBefore(start) || !d.isBefore(end)) continue;
+      words += e.wordCount;
+      corrections += e.correctionCount;
+      if (e.transcriptionDurationMs && e.transcriptionDurationMs > 0) {
+        speedWords += e.wordCount;
+        speedMs += e.transcriptionDurationMs;
+      }
+    }
+    const label = start.format("MMM D");
+    correctionRateWeekly.push({
+      label,
+      value: words > 0 ? Math.round((corrections / words) * 1000) / 10 : 0,
+    });
+    speedWeekly.push({
+      label,
+      value:
+        speedMs > 0 ? Math.round((speedWords / (speedMs / 1000)) * 10) / 10 : 0,
+    });
+  }
+
+  const lastRate =
+    correctionRateWeekly[correctionRateWeekly.length - 1]?.value ?? 0;
+  const prevRate =
+    correctionRateWeekly[correctionRateWeekly.length - 2]?.value ?? 0;
+  const correctionRateDeltaPct =
+    prevRate > 0 ? Math.round(((lastRate - prevRate) / prevRate) * 100) : null;
+
+  let verbatimWords = 0;
+  let polishedWords = 0;
+  for (const t of activeTranscriptions(transcriptions)) {
+    const words = transcriptWords(t);
+    if (t.postProcessMode && t.postProcessMode !== "none") {
+      polishedWords += words;
+    } else {
+      verbatimWords += words;
+    }
+  }
+  const splitWords = verbatimWords + polishedWords;
+  const verbatimPct =
+    splitWords > 0 ? Math.round((verbatimWords / splitWords) * 100) : 0;
+
+  return {
+    correctionRateWeekly,
+    correctionRateDeltaPct,
+    verbatimWords,
+    polishedWords,
+    verbatimPct,
+    speedWeekly,
+  };
+};
+
+export const AVG_EMAIL_WORDS = 150;
+export const AVG_TWEET_WORDS = 20;
+export const AVG_PAGE_WORDS = 250;
+
+export type WordComparisons = {
+  emails: number;
+  tweets: number;
+  pages: number;
+};
+
+export const computeWordComparisons = (
+  totalWords: number,
+): WordComparisons => ({
+  emails: Math.round(totalWords / AVG_EMAIL_WORDS),
+  tweets: Math.round(totalWords / AVG_TWEET_WORDS),
+  pages: Math.round(totalWords / AVG_PAGE_WORDS),
+});
+
+export type MilestoneOutlook = {
+  nextMilestone: number | null;
+  wordsRemaining: number | null;
+  daysToNextMilestone: number | null;
+  /** ISO date (YYYY-MM-DD) the next milestone is projected to land on. */
+  projectedDate: string | null;
+};
+
+export const computeMilestoneOutlook = (
+  events: LocalDictationEvent[],
+  transcriptions: Transcription[],
+): MilestoneOutlook => {
+  const usage = computeUsage(events, transcriptions);
+  const predictions = computePredictions(events, transcriptions);
+  const wordsRemaining =
+    predictions.nextMilestone !== null
+      ? Math.max(0, predictions.nextMilestone - usage.totalWords)
+      : null;
+  const projectedDate =
+    predictions.daysToNextMilestone !== null
+      ? dayjs().add(predictions.daysToNextMilestone, "day").format("YYYY-MM-DD")
+      : null;
+  return {
+    nextMilestone: predictions.nextMilestone,
+    wordsRemaining,
+    daysToNextMilestone: predictions.daysToNextMilestone,
+    projectedDate,
+  };
+};

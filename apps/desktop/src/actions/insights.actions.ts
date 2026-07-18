@@ -230,11 +230,26 @@ export const generateVoiceProfile = async (opts?: {
 export type TranscriptReview = {
   critique: string;
   rewrite: string;
+  // Richer, more actionable additions layered on top of the original
+  // {critique, rewrite} shape. Optional so existing consumers that only
+  // destructure critique/rewrite keep working untouched.
+  assessment?: string;
+  tips?: string[];
 };
 
+// Strip common code-fence wrappers (```json ... ``` or ``` ... ```) a model
+// sometimes wraps its JSON in despite being told not to.
+const stripCodeFence = (raw: string): string =>
+  raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+
 // One-shot "Review this" for a single transcript: sends it to the big model and
-// gets back honest coaching plus a cleaner rewrite. Falls back to the user's
-// configured model, and degrades gracefully to raw text if JSON isn't returned.
+// gets back an honest one-line assessment, specific fix-it tips, and a cleaner
+// rewrite. Falls back to the user's configured model, and degrades gracefully
+// to raw text if JSON isn't returned.
 export const reviewTranscript = async (
   transcript: string,
 ): Promise<TranscriptReview> => {
@@ -243,7 +258,7 @@ export const reviewTranscript = async (
   if (!text) throw new Error("empty transcript");
 
   const system =
-    "You are a warm, sharp writing and speaking coach. Given one thing the user dictated by voice, give brief honest feedback and a cleaner rewrite. Respond with ONLY a JSON object, no prose or markdown.";
+    "You are a warm, sharp writing and speaking coach. Given one thing the user dictated by voice, give a one-line assessment, 2-4 concrete actionable tips, brief honest feedback, and a cleaner rewrite. Respond with ONLY a JSON object, no prose or markdown, no code fences.";
   const prompt = `Here is something the user dictated by voice:
 
 """
@@ -252,6 +267,8 @@ ${text.slice(0, 4000)}
 
 Return a JSON object with exactly these keys:
 {
+  "assessment": "a single blunt-but-kind sentence summing up how this dictation landed overall",
+  "tips": ["2-4 short, specific, actionable fixes — each tied to something concrete in this transcript (a filler word, a run-on sentence, a vague phrase, a missing structure), not generic advice"],
   "critique": "2-4 sentences of specific, kind, actionable feedback on clarity, structure, filler words, and tone",
   "rewrite": "a cleaner, tighter version that keeps their voice and meaning, in the same language as the original"
 }`;
@@ -270,13 +287,29 @@ Return a JSON object with exactly these keys:
     raw = (await gen.repo.generateText(input)).text;
   }
 
-  const match = raw.match(/\{[\s\S]*\}/);
+  const match = stripCodeFence(raw).match(/\{[\s\S]*\}/);
   if (match) {
     try {
       const p = JSON.parse(match[0]) as Record<string, unknown>;
       const critique = typeof p.critique === "string" ? p.critique.trim() : "";
       const rewrite = typeof p.rewrite === "string" ? p.rewrite.trim() : "";
-      if (critique || rewrite) return { critique, rewrite };
+      const assessment =
+        typeof p.assessment === "string" ? p.assessment.trim() : "";
+      const tips = Array.isArray(p.tips)
+        ? p.tips
+            .filter((tip): tip is string => typeof tip === "string")
+            .map((tip) => tip.trim())
+            .filter(Boolean)
+            .slice(0, 4)
+        : [];
+      if (critique || rewrite || assessment || tips.length > 0) {
+        return {
+          critique,
+          rewrite,
+          assessment: assessment || undefined,
+          tips: tips.length > 0 ? tips : undefined,
+        };
+      }
     } catch {
       // fall through to raw degrade
     }

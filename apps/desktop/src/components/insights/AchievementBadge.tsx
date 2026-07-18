@@ -99,8 +99,24 @@ export const AchievementBadge = ({
         </Box>
       </Box>
       <Box flex={1} minWidth={0}>
-        <Stack direction="row" spacing={0.75} alignItems="center">
-          <Typography variant="body2" fontWeight={600} noWrap>
+        <Stack
+          direction="row"
+          spacing={0.75}
+          alignItems="flex-start"
+          sx={{ minWidth: 0 }}
+        >
+          <Typography
+            variant="body2"
+            fontWeight={600}
+            sx={{
+              minWidth: 0,
+              overflowWrap: "anywhere",
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+          >
             {achievement.label}
           </Typography>
           <Box
@@ -115,13 +131,25 @@ export const AchievementBadge = ({
               borderRadius: 0.75,
               px: 0.5,
               py: 0.1,
+              mt: 0.25,
               flexShrink: 0,
+              whiteSpace: "nowrap",
             }}
           >
             {tier}
           </Box>
         </Stack>
-        <Typography variant="caption" color="textSecondary" noWrap>
+        <Typography
+          variant="caption"
+          color="textSecondary"
+          sx={{
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+            overflowWrap: "anywhere",
+          }}
+        >
           {achievement.description}
         </Typography>
       </Box>

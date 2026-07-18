@@ -1,15 +1,24 @@
 import { useMemo } from "react";
-import { Stack, Typography } from "@mui/material";
+import TrendingDownIcon from "@mui/icons-material/TrendingDown";
+import TrendingFlatIcon from "@mui/icons-material/TrendingFlat";
+import TrendingUpIcon from "@mui/icons-material/TrendingUp";
+import { LinearProgress, Stack, Typography } from "@mui/material";
 import dayjs from "dayjs";
-import { FormattedMessage } from "react-intl";
+import { FormattedMessage, useIntl } from "react-intl";
 import { Section } from "../common/Section";
 import {
   booksComparison,
+  computeEfficiency,
+  computeMilestoneOutlook,
   computeMomentum,
   computePredictions,
+  computeRhythm,
+  computeSessionStats,
   computeTrends,
   computeUsage,
   computeUsageExtras,
+  computeWeekComparison,
+  computeWordComparisons,
 } from "../../lib/insights/compute";
 import { DailyActivity } from "./DailyActivity";
 import { InsightsEmpty } from "./InsightsEmpty";
@@ -24,7 +33,32 @@ const HOUR_LABELS = Array.from({ length: 24 }, (_, h) => {
   return `${hour}${period}`;
 });
 
+const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+const DeltaIndicator = ({ pct }: { pct: number | null }) => {
+  if (pct === null) return null;
+  if (pct === 0) {
+    return <TrendingFlatIcon fontSize="small" color="disabled" />;
+  }
+  return pct > 0 ? (
+    <TrendingUpIcon fontSize="small" color="success" />
+  ) : (
+    <TrendingDownIcon fontSize="small" color="error" />
+  );
+};
+
+const DeltaLabel = ({ pct }: { pct: number | null }) => {
+  if (pct === null) return <>—</>;
+  return (
+    <FormattedMessage
+      defaultMessage="{sign}{pct}% vs last week"
+      values={{ sign: pct > 0 ? "+" : "", pct }}
+    />
+  );
+};
+
 export const YourUsageTab = () => {
+  const intl = useIntl();
   const { events, transcriptions } = useInsightsSources();
   const usage = useMemo(
     () => computeUsage(events, transcriptions),
@@ -38,8 +72,25 @@ export const YourUsageTab = () => {
     () => booksComparison(usage.totalWords),
     [usage.totalWords],
   );
+  const wordComparisons = useMemo(
+    () => computeWordComparisons(usage.totalWords),
+    [usage.totalWords],
+  );
   const momentum = useMemo(
     () => computeMomentum(events, transcriptions),
+    [events, transcriptions],
+  );
+  const weekComparison = useMemo(
+    () => computeWeekComparison(transcriptions),
+    [transcriptions],
+  );
+  const rhythm = useMemo(() => computeRhythm(transcriptions), [transcriptions]);
+  const sessionStats = useMemo(
+    () => computeSessionStats(transcriptions),
+    [transcriptions],
+  );
+  const efficiency = useMemo(
+    () => computeEfficiency(events, transcriptions),
     [events, transcriptions],
   );
   const trends = useMemo(() => computeTrends(transcriptions), [transcriptions]);
@@ -47,10 +98,38 @@ export const YourUsageTab = () => {
     () => computePredictions(events, transcriptions),
     [events, transcriptions],
   );
+  const milestoneOutlook = useMemo(
+    () => computeMilestoneOutlook(events, transcriptions),
+    [events, transcriptions],
+  );
 
   if (usage.totalDictations === 0) {
     return <InsightsEmpty />;
   }
+
+  const chronotypeMessage = (() => {
+    switch (rhythm.chronotype) {
+      case "morning":
+        return intl.formatMessage({
+          defaultMessage: "You're a morning dictator — most words before noon.",
+        });
+      case "afternoon":
+        return intl.formatMessage({
+          defaultMessage: "You're an afternoon dictator — your peak is midday.",
+        });
+      case "evening":
+        return intl.formatMessage({
+          defaultMessage:
+            "You're an evening dictator — you pick up after work.",
+        });
+      case "night":
+        return intl.formatMessage({
+          defaultMessage: "You're a night owl — most words after 10pm.",
+        });
+      default:
+        return null;
+    }
+  })();
 
   return (
     <Stack spacing={3}>
@@ -113,6 +192,71 @@ export const YourUsageTab = () => {
         />
       </Stack>
 
+      <Section
+        title={<FormattedMessage defaultMessage="This week vs last week" />}
+        description={
+          <FormattedMessage defaultMessage="How your momentum is trending week over week." />
+        }
+      >
+        <Stack spacing={2}>
+          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+            <StatCard
+              label={<FormattedMessage defaultMessage="Words this week" />}
+              value={weekComparison.wordsThisWeek.toLocaleString()}
+              hint={
+                <Stack direction="row" spacing={0.5} alignItems="center">
+                  <DeltaIndicator pct={weekComparison.wordsDeltaPct} />
+                  <DeltaLabel pct={weekComparison.wordsDeltaPct} />
+                </Stack>
+              }
+            />
+            <StatCard
+              label={<FormattedMessage defaultMessage="Pace this week" />}
+              value={weekComparison.wpmThisWeek || "—"}
+              hint={
+                <Stack direction="row" spacing={0.5} alignItems="center">
+                  <DeltaIndicator pct={weekComparison.wpmDeltaPct} />
+                  <DeltaLabel pct={weekComparison.wpmDeltaPct} />
+                </Stack>
+              }
+            />
+            <StatCard
+              label={<FormattedMessage defaultMessage="Active days" />}
+              value={weekComparison.activeDaysThisWeek}
+              hint={
+                <FormattedMessage
+                  defaultMessage="{delta} vs last week ({last} days)"
+                  values={{
+                    delta:
+                      weekComparison.activeDaysDelta > 0
+                        ? `+${weekComparison.activeDaysDelta}`
+                        : weekComparison.activeDaysDelta,
+                    last: weekComparison.activeDaysLastWeek,
+                  }}
+                />
+              }
+            />
+            <StatCard
+              label={<FormattedMessage defaultMessage="Vs your best week" />}
+              value={
+                weekComparison.paceVsBestWeekPct !== null
+                  ? `${weekComparison.paceVsBestWeekPct}%`
+                  : "—"
+              }
+              hint={
+                <FormattedMessage
+                  defaultMessage="Best week: {words} words"
+                  values={{
+                    words:
+                      weekComparison.personalBestWeekWords.toLocaleString(),
+                  }}
+                />
+              }
+            />
+          </Stack>
+        </Stack>
+      </Section>
+
       <Section title={<FormattedMessage defaultMessage="Daily activity" />}>
         <DailyActivity
           usage={usage}
@@ -122,9 +266,47 @@ export const YourUsageTab = () => {
         />
       </Section>
 
-      <Section title={<FormattedMessage defaultMessage="When you dictate" />}>
-        <Stack spacing={1.5}>
-          <MiniBars data={extras.hourHistogram} labels={HOUR_LABELS} />
+      <Section
+        title={<FormattedMessage defaultMessage="When you dictate" />}
+        description={
+          <FormattedMessage defaultMessage="Your rhythm by hour of day and day of week." />
+        }
+      >
+        <Stack spacing={2.5}>
+          <Stack spacing={1}>
+            <Typography variant="body2" color="textSecondary">
+              <FormattedMessage defaultMessage="By hour of day" />
+            </Typography>
+            <MiniBars data={rhythm.hourBars} labels={HOUR_LABELS} />
+          </Stack>
+          <Stack spacing={1}>
+            <Typography variant="body2" color="textSecondary">
+              <FormattedMessage defaultMessage="By day of week" />
+            </Typography>
+            <MiniBars data={rhythm.weekdayBars} labels={WEEKDAY_LABELS} />
+          </Stack>
+          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+            <StatCard
+              label={<FormattedMessage defaultMessage="Consistency" />}
+              value={`${rhythm.consistencyScore}`}
+              hint={
+                <FormattedMessage defaultMessage="0-100 · higher = more even, less bursty" />
+              }
+            />
+            <StatCard
+              label={<FormattedMessage defaultMessage="Peak day" />}
+              value={rhythm.peakWeekdayLabel ?? "—"}
+            />
+            <StatCard
+              label={<FormattedMessage defaultMessage="Peak hour" />}
+              value={rhythm.peakHourLabel ?? "—"}
+            />
+          </Stack>
+          {chronotypeMessage && (
+            <Typography variant="body2" color="textSecondary">
+              {chronotypeMessage}
+            </Typography>
+          )}
           {extras.bestDay && (
             <Typography variant="body2" color="textSecondary">
               <FormattedMessage
@@ -143,7 +325,7 @@ export const YourUsageTab = () => {
         <Stack spacing={2.5}>
           <Stack spacing={0.5}>
             <Typography variant="body2" color="textSecondary">
-              <FormattedMessage defaultMessage="Speaking pace (weekly)" />
+              <FormattedMessage defaultMessage="Speaking pace, words per minute (weekly)" />
               {trends.wpmDeltaPct !== 0 && (
                 <FormattedMessage
                   defaultMessage=" · {pct}% vs last week"
@@ -160,13 +342,13 @@ export const YourUsageTab = () => {
           </Stack>
           <Stack spacing={0.5}>
             <Typography variant="body2" color="textSecondary">
-              <FormattedMessage defaultMessage="Vocabulary growth" />
+              <FormattedMessage defaultMessage="Vocabulary growth, unique words used (cumulative)" />
             </Typography>
             <MiniLine data={trends.vocabGrowth} />
           </Stack>
           <Stack spacing={0.5}>
             <Typography variant="body2" color="textSecondary">
-              <FormattedMessage defaultMessage="Filler words per 100 (weekly)" />
+              <FormattedMessage defaultMessage="Filler words per 100 words (weekly)" />
             </Typography>
             <MiniBars
               data={trends.fillerWeekly.map((p) => p.value)}
@@ -176,16 +358,152 @@ export const YourUsageTab = () => {
         </Stack>
       </Section>
 
-      <Section title={<FormattedMessage defaultMessage="Looking ahead" />}>
-        <Stack spacing={1}>
-          {predictions.nextMilestone !== null &&
-            predictions.daysToNextMilestone !== null && (
+      <Section
+        title={<FormattedMessage defaultMessage="Sessions" />}
+        description={
+          <FormattedMessage defaultMessage="How long a typical dictation runs, and how that's changing." />
+        }
+      >
+        <Stack spacing={2}>
+          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+            <StatCard
+              label={
+                <FormattedMessage defaultMessage="Avg words / dictation" />
+              }
+              value={sessionStats.avgWordsPerSession.toLocaleString()}
+            />
+            <StatCard
+              label={<FormattedMessage defaultMessage="Typical (median)" />}
+              value={sessionStats.medianWordsPerSession.toLocaleString()}
+            />
+            <StatCard
+              label={<FormattedMessage defaultMessage="Longest dictation" />}
+              value={sessionStats.longestSessionWords.toLocaleString()}
+              hint={
+                sessionStats.longestSessionDate
+                  ? dayjs(sessionStats.longestSessionDate).format("MMM D, YYYY")
+                  : undefined
+              }
+            />
+            <StatCard
+              label={
+                <FormattedMessage defaultMessage="Dictations / active day" />
+              }
+              value={sessionStats.sessionsPerActiveDay || "—"}
+            />
+          </Stack>
+          <Stack spacing={0.5}>
+            <Typography variant="body2" color="textSecondary">
+              <FormattedMessage defaultMessage="Words per dictation (weekly average)" />
+            </Typography>
+            <MiniLine data={sessionStats.wordsPerSessionWeekly} />
+          </Stack>
+        </Stack>
+      </Section>
+
+      <Section
+        title={<FormattedMessage defaultMessage="Efficiency" />}
+        description={
+          <FormattedMessage defaultMessage="How much editing OS Voice's output still needs, and how fast it's processing." />
+        }
+      >
+        <Stack spacing={2.5}>
+          <Stack spacing={0.5}>
+            <Typography variant="body2" color="textSecondary">
+              <FormattedMessage defaultMessage="Corrections per 100 words (weekly)" />
+              {efficiency.correctionRateDeltaPct !== null && (
+                <FormattedMessage
+                  defaultMessage=" · {pct}% vs last week"
+                  values={{
+                    pct:
+                      efficiency.correctionRateDeltaPct > 0
+                        ? `+${efficiency.correctionRateDeltaPct}`
+                        : efficiency.correctionRateDeltaPct,
+                  }}
+                />
+              )}
+            </Typography>
+            <MiniBars
+              data={efficiency.correctionRateWeekly.map((p) => p.value)}
+              labels={efficiency.correctionRateWeekly.map((p) => p.label)}
+            />
+          </Stack>
+          <Stack spacing={0.5}>
+            <Typography variant="body2" color="textSecondary">
+              <FormattedMessage defaultMessage="Transcription speed, words / second processed (weekly)" />
+            </Typography>
+            {efficiency.speedWeekly.some((p) => p.value > 0) ? (
+              <MiniLine data={efficiency.speedWeekly} />
+            ) : (
+              <Typography variant="caption" color="textSecondary">
+                <FormattedMessage defaultMessage="Not enough timing data yet." />
+              </Typography>
+            )}
+          </Stack>
+          <Stack spacing={0.75}>
+            <Stack direction="row" justifyContent="space-between">
+              <Typography variant="body2" color="textSecondary">
+                <FormattedMessage defaultMessage="Verbatim vs polished" />
+              </Typography>
               <Typography variant="body2" color="textSecondary">
                 <FormattedMessage
-                  defaultMessage="At your current pace, you'll hit {milestone} words in about {days} days."
+                  defaultMessage="{pct}% verbatim"
+                  values={{ pct: efficiency.verbatimPct }}
+                />
+              </Typography>
+            </Stack>
+            {efficiency.verbatimWords + efficiency.polishedWords > 0 ? (
+              <>
+                <LinearProgress
+                  variant="determinate"
+                  value={efficiency.verbatimPct}
+                  aria-label={intl.formatMessage({
+                    defaultMessage:
+                      "Share of words dictated verbatim vs polished by AI",
+                  })}
+                  sx={{ height: 8, borderRadius: 4 }}
+                />
+                <Typography variant="caption" color="textSecondary">
+                  <FormattedMessage
+                    defaultMessage="{verbatim} verbatim words · {polished} AI-polished words"
+                    values={{
+                      verbatim: efficiency.verbatimWords.toLocaleString(),
+                      polished: efficiency.polishedWords.toLocaleString(),
+                    }}
+                  />
+                </Typography>
+              </>
+            ) : (
+              <Typography variant="caption" color="textSecondary">
+                <FormattedMessage defaultMessage="We'll show this split as you dictate." />
+              </Typography>
+            )}
+          </Stack>
+        </Stack>
+      </Section>
+
+      <Section title={<FormattedMessage defaultMessage="Looking ahead" />}>
+        <Stack spacing={1}>
+          {milestoneOutlook.nextMilestone !== null &&
+            milestoneOutlook.daysToNextMilestone !== null &&
+            milestoneOutlook.wordsRemaining !== null && (
+              <Typography variant="body2" color="textSecondary">
+                <FormattedMessage
+                  defaultMessage="At your current pace, {remaining} words to go until {milestone} — about {days} days{date}."
                   values={{
-                    milestone: predictions.nextMilestone.toLocaleString(),
-                    days: predictions.daysToNextMilestone,
+                    remaining: milestoneOutlook.wordsRemaining.toLocaleString(),
+                    milestone: milestoneOutlook.nextMilestone.toLocaleString(),
+                    days: milestoneOutlook.daysToNextMilestone,
+                    date: milestoneOutlook.projectedDate
+                      ? intl.formatMessage(
+                          { defaultMessage: " (around {date})" },
+                          {
+                            date: dayjs(milestoneOutlook.projectedDate).format(
+                              "MMM D, YYYY",
+                            ),
+                          },
+                        )
+                      : "",
                   }}
                 />
               </Typography>
@@ -196,6 +514,17 @@ export const YourUsageTab = () => {
               values={{
                 words: predictions.projectedMonthWords.toLocaleString(),
                 rate: predictions.dailyRate.toLocaleString(),
+              }}
+            />
+          </Typography>
+          <Typography variant="body2" color="textSecondary">
+            <FormattedMessage
+              defaultMessage="Lifetime, that's about {books}, {pages} manuscript pages, {emails} emails, or {tweets} tweets."
+              values={{
+                books: books.phrase,
+                pages: wordComparisons.pages.toLocaleString(),
+                emails: wordComparisons.emails.toLocaleString(),
+                tweets: wordComparisons.tweets.toLocaleString(),
               }}
             />
           </Typography>
