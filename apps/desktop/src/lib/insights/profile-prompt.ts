@@ -13,8 +13,8 @@ export const buildProfileUserPrompt = (args: {
 }): string => {
   const { usage, profile, words, samples, previousIdentity } = args;
   const sample = samples
-    .slice(0, 40)
-    .map((s, i) => `${i + 1}. ${s.slice(0, 280)}`)
+    .slice(0, 60)
+    .map((s, i) => `${i + 1}. ${s.slice(0, 320)}`)
     .join("\n");
   const recent = samples
     .slice(0, 15)
@@ -41,7 +41,7 @@ STATS:
 SAMPLES (verbatim things they said):
 ${sample}
 
-Return a JSON object with exactly these keys:
+Be deep and specific — this should feel like it genuinely *gets* them. Return a JSON object with exactly these keys:
 {
   "name": "a short evocative persona name that captures them (e.g. The Late-Night Builder)",
   "identity": "2-3 sentences addressed to them, e.g. 'You communicate like... You frequently...'",
@@ -49,6 +49,11 @@ Return a JSON object with exactly these keys:
   "topics": ["3-6 recurring topics/themes actually visible in the samples"],
   "style": "one sentence describing their communication style",
   "quirks": ["2-4 notable speech quirks or habits you actually observe"],
+  "howYouThink": "2-3 sentences on how they reason and make decisions (e.g. do they think out loud, work top-down, hedge, decide fast)",
+  "whatYouCareAbout": ["3-6 things/values/goals they clearly care about, from the samples"],
+  "expertise": ["2-5 domains or skills they clearly know well, evidenced by the samples"],
+  "howYouSpeak": "2-3 sentences of real linguistic analysis: sentence structure, pacing, directness, formality, energy, filler habits",
+  "ubiquitousLanguage": ["6-12 of their CHARACTERISTIC recurring words/phrases/terms — the vocabulary they live in — pulled verbatim from the samples"],
   "recentActivity": "one sentence starting 'Lately you've been...' summarizing their most recent dictations",
   "tone": "1-3 words for their tone/energy (e.g. assertive, measured, enthusiastic)",
   "whatsChanged": "one short sentence on what's shifted since the previous profile, or '' if none/unknown"
@@ -74,6 +79,11 @@ export const parseProfileResponse = (text: string): AiVoiceProfile | null => {
       topics: arr(p.topics),
       style: typeof p.style === "string" ? p.style : "",
       quirks: arr(p.quirks),
+      howYouThink: str(p.howYouThink),
+      whatYouCareAbout: arr(p.whatYouCareAbout),
+      expertise: arr(p.expertise),
+      howYouSpeak: str(p.howYouSpeak),
+      ubiquitousLanguage: arr(p.ubiquitousLanguage),
       recentActivity: str(p.recentActivity),
       tone: str(p.tone),
       whatsChanged: str(p.whatsChanged),

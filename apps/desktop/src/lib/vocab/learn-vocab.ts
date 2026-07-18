@@ -359,7 +359,7 @@ export const learnVocabulary = (
   transcripts: string[],
   opts: LearnVocabOptions = {},
 ): string[] => {
-  const max = opts.max ?? 40;
+  const max = opts.max ?? 60;
   const excluded = new Set(
     Array.from(opts.excluded ?? []).map((word) => word.toLowerCase()),
   );
@@ -438,7 +438,9 @@ export const learnVocabulary = (
     }
   }
 
-  const THRESHOLD = 3;
+  // Lowered to 2 so it identifies more of the user's real vocabulary; the
+  // proper-noun / mid-sentence-caps safeguards above keep out "Alright/Hey" noise.
+  const THRESHOLD = 2;
   const score = (entry: Entry): number =>
     entry.weight * Math.log(1 + entry.count);
 

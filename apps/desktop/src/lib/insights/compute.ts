@@ -834,6 +834,19 @@ export const computeAchievements = (
   }
   const mostInDay = Math.max(0, ...Array.from(byDay.values()));
 
+  let nightWords = 0;
+  let earlyWords = 0;
+  let marathon = 0;
+  for (const t of active) {
+    const h = dayjs(t.createdAt).hour();
+    const w = transcriptWords(t);
+    if (h < 5) nightWords += w;
+    if (h >= 5 && h < 8) earlyWords += w;
+    if (w > marathon) marathon = w;
+  }
+  const activeDays = byDay.size;
+  const vocab = computeWordAnalysis(transcriptions).vocabularySize;
+
   const goal = (
     key: string,
     label: string,
@@ -879,7 +892,39 @@ export const computeAchievements = (
       7,
     ),
     goal("s30", "Monthly habit", "30-day streak", usage.longestStreak, 30),
+    goal("s100", "Century", "100-day streak", usage.longestStreak, 100),
     goal("bigday", "Big day", "1,000 words in a single day", mostInDay, 1000),
+    goal("w25k", "25k club", "Dictate 25,000 words", usage.totalWords, 25000),
+    goal(
+      "w100k",
+      "Six figures",
+      "Dictate 100,000 words",
+      usage.totalWords,
+      100000,
+    ),
+    goal(
+      "night",
+      "Night owl",
+      "Dictate 500 words after midnight",
+      nightWords,
+      500,
+    ),
+    goal(
+      "early",
+      "Early bird",
+      "Dictate 500 words before 8am",
+      earlyWords,
+      500,
+    ),
+    goal(
+      "marathon",
+      "Marathon",
+      "300 words in a single dictation",
+      marathon,
+      300,
+    ),
+    goal("regular", "Regular", "Dictate on 30 different days", activeDays, 30),
+    goal("wordsmith", "Wordsmith", "Use 2,000 distinct words", vocab, 2000),
   ];
 };
 

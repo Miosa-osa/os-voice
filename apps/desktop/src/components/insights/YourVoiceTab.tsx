@@ -282,6 +282,39 @@ export const YourVoiceTab = () => {
         </Stack>
       </Card>
 
+      {aiProfile?.howYouThink && (
+        <Section title={<FormattedMessage defaultMessage="How you think" />}>
+          <Typography variant="body2" color="textSecondary">
+            {aiProfile.howYouThink}
+          </Typography>
+        </Section>
+      )}
+
+      {aiProfile && (aiProfile.ubiquitousLanguage?.length ?? 0) > 0 && (
+        <Section
+          title={<FormattedMessage defaultMessage="Your ubiquitous language" />}
+          description={
+            <FormattedMessage defaultMessage="The words and phrases you live in — the vocabulary that's distinctly yours." />
+          }
+        >
+          <ChipRow items={aiProfile.ubiquitousLanguage ?? []} />
+        </Section>
+      )}
+
+      {aiProfile && (aiProfile.whatYouCareAbout?.length ?? 0) > 0 && (
+        <Section
+          title={<FormattedMessage defaultMessage="What you care about" />}
+        >
+          <ChipRow items={aiProfile.whatYouCareAbout ?? []} />
+        </Section>
+      )}
+
+      {aiProfile && (aiProfile.expertise?.length ?? 0) > 0 && (
+        <Section title={<FormattedMessage defaultMessage="Your expertise" />}>
+          <ChipRow items={aiProfile.expertise ?? []} />
+        </Section>
+      )}
+
       {aiProfile && aiProfile.quirks.length > 0 && (
         <Section title={<FormattedMessage defaultMessage="Speech quirks" />}>
           <ChipRow items={aiProfile.quirks} />
@@ -290,6 +323,11 @@ export const YourVoiceTab = () => {
 
       {totalWords >= WORD_ANALYSIS_UNLOCK_WORDS ? (
         <Section title={<FormattedMessage defaultMessage="How you speak" />}>
+          {aiProfile?.howYouSpeak && (
+            <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+              {aiProfile.howYouSpeak}
+            </Typography>
+          )}
           <Box
             sx={{
               display: "grid",

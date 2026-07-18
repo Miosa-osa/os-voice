@@ -4,10 +4,12 @@ import dayjs from "dayjs";
 import { FormattedMessage, useIntl } from "react-intl";
 import { HeatmapCell } from "../../lib/insights/compute";
 
-const CELL = 13;
+const CELL = 14;
 const GAP = 3;
 const COL = CELL + GAP;
 const LABEL_W = 30;
+// Show a recent window that fits without an awkward horizontal drag.
+const WEEKS_TO_SHOW = 26;
 
 const RAMP = {
   light: {
@@ -36,9 +38,11 @@ export const ContributionHeatmap = ({
   const colorFor = (level: number): string =>
     level <= 0 ? ramp.empty : ramp.steps[Math.min(level, 4) - 1];
 
+  const shown =
+    cells.length > WEEKS_TO_SHOW * 7 ? cells.slice(-WEEKS_TO_SHOW * 7) : cells;
   const weeks: HeatmapCell[][] = [];
-  for (let i = 0; i < cells.length; i += 7) {
-    weeks.push(cells.slice(i, i + 7));
+  for (let i = 0; i < shown.length; i += 7) {
+    weeks.push(shown.slice(i, i + 7));
   }
 
   const monthLabels: { col: number; label: string }[] = [];

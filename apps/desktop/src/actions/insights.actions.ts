@@ -24,10 +24,18 @@ import {
   AiVoiceProfile,
   StoredVoiceProfile,
 } from "../lib/insights/profile.types";
+import { OllamaGenerateTextRepo } from "../repos/generate-text.repo";
 import { getAppState, produceAppState } from "../store";
 import { registerTerms, registerTranscriptions } from "../utils/app.utils";
 import { createId } from "../utils/id.utils";
 import { getLogger } from "../utils/log.utils";
+import { getMyUserPreferences } from "../utils/user.utils";
+
+// Deep-profile model: a large model (served via the local Ollama endpoint,
+// which routes `*-cloud` models to Ollama's cloud) for a genuinely insightful
+// read. Falls back to the user's configured model, then a template.
+const PROFILE_MODEL = "gpt-oss:120b-cloud";
+const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 
 export const loadInsights = async (): Promise<void> => {
   produceAppState((draft) => {
@@ -118,18 +126,16 @@ export const generateVoiceProfile = async (opts?: {
 
   const base = computeVoiceProfile(events, transcriptions, terms, milestone);
   const words = computeWordAnalysis(transcriptions);
-  const samples = sampleTranscripts(transcriptions);
+  const samples = sampleTranscripts(transcriptions, 70);
 
   let profile: AiVoiceProfile;
   const liteMode = state.local.liteMode === true;
   try {
     if (liteMode) {
-      // Lite mode skips the local LLM entirely to stay light on weak hardware.
+      // Lite mode skips the LLM entirely to stay light on weak hardware.
       profile = templatedProfile(base);
     } else {
-      const gen = getGenerateTextRepo();
-      if (!gen.repo) throw new Error("no generation model configured");
-      const output = await gen.repo.generateText({
+      const input = {
         system: buildProfileSystemPrompt(),
         prompt: buildProfileUserPrompt({
           usage,
@@ -138,8 +144,23 @@ export const generateVoiceProfile = async (opts?: {
           samples,
           previousIdentity: latest?.profile.identity ?? null,
         }),
-      });
-      profile = parseProfileResponse(output.text) ?? templatedProfile(base);
+      };
+      const ollamaUrl =
+        getMyUserPreferences(state)?.postProcessingOllamaUrl ??
+        DEFAULT_OLLAMA_URL;
+      let text: string | null = null;
+      try {
+        const deep = new OllamaGenerateTextRepo(ollamaUrl, PROFILE_MODEL);
+        text = (await deep.generateText(input)).text;
+      } catch (deepError) {
+        // Big model unavailable (offline / not authed) — fall back to whatever
+        // model the user has configured, then to a template.
+        getLogger().warning(`Deep profile model unavailable: ${deepError}`);
+        const gen = getGenerateTextRepo();
+        if (!gen.repo) throw new Error("no generation model configured");
+        text = (await gen.repo.generateText(input)).text;
+      }
+      profile = parseProfileResponse(text) ?? templatedProfile(base);
     }
   } catch (error) {
     getLogger().warning(
