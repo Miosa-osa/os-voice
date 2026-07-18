@@ -1,5 +1,5 @@
 import { Check, MoreVert } from "@mui/icons-material";
-import { Box, IconButton, Stack, Typography } from "@mui/material";
+import { Box, Card, IconButton, Stack, Typography } from "@mui/material";
 import { getRec } from "@voquill/utilities";
 import { useCallback } from "react";
 import { FormattedMessage, useIntl } from "react-intl";
@@ -10,7 +10,6 @@ import {
 import { useAppStore } from "../../store";
 import { isMacOS } from "../../utils/env.utils";
 import { getGenerativePrefs } from "../../utils/user.utils";
-import { ListTile } from "../common/ListTile";
 import {
   MenuPopoverBuilder,
   type MenuPopoverItem,
@@ -103,67 +102,78 @@ export const AppStylingRow = ({ id }: AppStylingRowProps) => {
     },
   ];
 
-  const leading = (
-    <Box
-      sx={{
-        overflow: "hidden",
-        borderRadius: 0.75,
-        minWidth: 36,
-        minHeight: 36,
-        maxWidth: 36,
-        maxHeight: 36,
-        bgcolor: "level2",
-        mr: 1,
-      }}
-    >
-      {target?.iconPath && (
-        <StorageImage
-          path={target.iconPath}
-          alt={
-            target?.name ?? intl.formatMessage({ defaultMessage: "App icon" })
-          }
-          size={36}
-        />
-      )}
-    </Box>
-  );
-
-  const trailing = (
-    <Stack direction="row" spacing={1} alignItems="center">
-      <PostProcessingDisabledTooltip disabled={isPostProcessingDisabled}>
-        <ToneSelect
-          value={toneValue}
-          onToneChange={handleToneChange}
-          addToneTargetId={target?.id ?? null}
-          disabled={!target || isPostProcessingDisabled}
-          formControlSx={{ minWidth: 140 }}
-        />
-      </PostProcessingDisabledTooltip>
-      {!isMacOS() && (
-        <MenuPopoverBuilder items={pasteKeybindMenuItems}>
-          {({ ref, open }) => (
-            <IconButton
-              ref={ref}
-              onClick={open}
-              disabled={!target}
-              size="small"
-              sx={{ width: 32, height: 32, p: 0 }}
-            >
-              <MoreVert fontSize="small" />
-            </IconButton>
-          )}
-        </MenuPopoverBuilder>
-      )}
-    </Stack>
-  );
-
   return (
-    <ListTile
-      title={target?.name}
-      disableRipple
-      trailing={trailing}
-      leading={leading}
-      sx={{ backgroundColor: "level1", mb: 1, borderRadius: 1 }}
-    />
+    <Card sx={{ p: 2, mb: 1.5 }}>
+      <Stack
+        direction="row"
+        spacing={2}
+        alignItems="center"
+        justifyContent="space-between"
+        flexWrap="wrap"
+        useFlexGap
+      >
+        <Stack
+          direction="row"
+          spacing={1.5}
+          alignItems="center"
+          sx={{ minWidth: 0 }}
+        >
+          <Box
+            sx={{
+              overflow: "hidden",
+              borderRadius: 1,
+              width: 40,
+              height: 40,
+              flexShrink: 0,
+              bgcolor: "level2",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            {target?.iconPath && (
+              <StorageImage
+                path={target.iconPath}
+                alt={
+                  target?.name ??
+                  intl.formatMessage({ defaultMessage: "App icon" })
+                }
+                size={40}
+              />
+            )}
+          </Box>
+          <Typography variant="subtitle1" fontWeight={600} noWrap>
+            {target?.name}
+          </Typography>
+        </Stack>
+
+        <Stack direction="row" spacing={1} alignItems="center">
+          <PostProcessingDisabledTooltip disabled={isPostProcessingDisabled}>
+            <ToneSelect
+              value={toneValue}
+              onToneChange={handleToneChange}
+              addToneTargetId={target?.id ?? null}
+              disabled={!target || isPostProcessingDisabled}
+              formControlSx={{ minWidth: 160 }}
+            />
+          </PostProcessingDisabledTooltip>
+          {!isMacOS() && (
+            <MenuPopoverBuilder items={pasteKeybindMenuItems}>
+              {({ ref, open }) => (
+                <IconButton
+                  ref={ref}
+                  onClick={open}
+                  disabled={!target}
+                  size="small"
+                  sx={{ width: 32, height: 32, p: 0 }}
+                >
+                  <MoreVert fontSize="small" />
+                </IconButton>
+              )}
+            </MenuPopoverBuilder>
+          )}
+        </Stack>
+      </Stack>
+    </Card>
   );
 };
