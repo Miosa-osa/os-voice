@@ -16,7 +16,11 @@ export default function InsightsPage() {
 
   useEffect(() => {
     void loadInsights();
-    const interval = setInterval(() => void loadInsights(), 20000);
+    // Live updates already arrive via the debounced on-dictation refresh
+    // (scheduleInsightsRefresh), so this is just a slow fallback poll. Each run
+    // refetches ~5k transcriptions and rebuilds array refs, re-triggering every
+    // memoized compute in the tabs — so keep it infrequent (was 20s).
+    const interval = setInterval(() => void loadInsights(), 120000);
     return () => clearInterval(interval);
   }, []);
 

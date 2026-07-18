@@ -3,12 +3,75 @@ import type { ChatMessage, ToolPermission } from "@voquill/types";
 import { isEqual } from "lodash-es";
 import { useEffect, useRef } from "react";
 import type { AppState, StreamingMessageState } from "../../state/app.state";
-import { useAppStore } from "../../store";
+import { getAppState, useAppStore } from "../../store";
+import { getLogger } from "../../utils/log.utils";
 
 export const OverlaySyncSideEffects = () => {
   useNativePillAssistantSync();
+  usePillPhaseSelfHeal();
 
   return null;
+};
+
+// Every phase push to the native pill (invoke("set_phase", ...)) is
+// fire-and-forget with swallowed errors — see strategies/*.strategy.ts and
+// DictationSideEffects.tsx. If the "idle" push at the end of a recording is
+// dropped, the pill can be left stuck showing a stale phase (e.g. a
+// waveform) with nothing to self-heal it. This is a pure safety net: it only
+// reconciles the well-defined idle transition (recording/agent session
+// ended) against the native-confirmed `overlayPhase`, and never touches the
+// "recording"/"loading" transitions so it can't fight legitimate in-flight
+// phase changes.
+const PHASE_RECONCILE_RETRY_MS = 500;
+const PHASE_RECONCILE_MAX_ATTEMPTS = 6;
+
+const usePillPhaseSelfHeal = () => {
+  const activeRecordingMode = useAppStore((s) => s.activeRecordingMode);
+  const overlayPhase = useAppStore((s) => s.overlayPhase);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+
+    // Nothing to heal: either a session is active (leave "recording"/"loading"
+    // alone) or the pill has already confirmed idle.
+    if (activeRecordingMode !== null || overlayPhase === "idle") {
+      return;
+    }
+
+    let attempt = 0;
+    const reassertIdle = () => {
+      attempt += 1;
+
+      // Re-read live state instead of the closed-over values: a new
+      // recording may have started, or the native ack may have landed,
+      // since this timer was scheduled.
+      const state = getAppState();
+      if (state.activeRecordingMode !== null || state.overlayPhase === "idle") {
+        return;
+      }
+
+      invoke<void>("set_phase", { phase: "idle" }).catch((error) => {
+        getLogger().verbose(`Pill idle self-heal retry failed: ${error}`);
+      });
+
+      if (attempt < PHASE_RECONCILE_MAX_ATTEMPTS) {
+        timerRef.current = setTimeout(reassertIdle, PHASE_RECONCILE_RETRY_MS);
+      }
+    };
+
+    timerRef.current = setTimeout(reassertIdle, PHASE_RECONCILE_RETRY_MS);
+
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [activeRecordingMode, overlayPhase]);
 };
 
 type NativePillPayload = {

@@ -11,14 +11,101 @@ import {
   type LocalSidecarDevice,
 } from "../sidecars";
 import {
+  getTranscriptionSidecarDeviceId,
   isGpuPreferredTranscriptionDevice,
   LOCAL_WHISPER_MODELS,
   type LocalWhisperModel,
+  normalizeLocalWhisperModel,
   normalizeTranscriptionDevice,
 } from "../utils/local-transcription.utils";
-import { getEffectiveTranscriptionMode } from "../utils/user.utils";
+import {
+  getEffectiveTranscriptionMode,
+  getIsOnboarded,
+} from "../utils/user.utils";
+import { getLogger } from "../utils/log.utils";
 import { showErrorSnackbar } from "./app.actions";
 import { setPreferredTranscriptionDevice } from "./user.actions";
+
+// Local models heavy enough that eagerly loading them on CPU-only hardware would
+// cause an unwelcome startup spike. The hardware recommender never selects these
+// for CPU, so this only skips manually-forced heavy configs.
+const HEAVY_CPU_MODELS: ReadonlySet<LocalWhisperModel> = new Set([
+  "medium",
+  "large",
+  "turbo",
+  "hindi2hinglish",
+]);
+
+let prewarmStarted = false;
+
+/**
+ * Pre-warm the local transcription sidecar + model shortly after app startup so
+ * the first dictation avoids the spawn + model-load cold start. Best-effort and
+ * fully non-fatal: any failure is logged and never blocks a real dictation.
+ *
+ * Guard rails (all must hold, else it is skipped):
+ * - onboarding is complete (a model/device has been chosen);
+ * - the effective transcription mode is "local" (not cloud/api);
+ * - lite / low-power mode is off;
+ * - the selected model is already downloaded;
+ * - the selected model is not a heavy model on CPU-only hardware.
+ */
+export const prewarmLocalTranscription = async (): Promise<void> => {
+  if (prewarmStarted) {
+    return;
+  }
+
+  const state = getAppState();
+
+  if (!getIsOnboarded(state)) {
+    return;
+  }
+
+  if (getEffectiveTranscriptionMode(state) !== "local") {
+    return;
+  }
+
+  if (state.local.liteMode === true) {
+    return;
+  }
+
+  const settings = state.settings.aiTranscription;
+  const model = normalizeLocalWhisperModel(settings.modelSize);
+  const preferGpu = isGpuPreferredTranscriptionDevice(settings.device);
+  const deviceId = getTranscriptionSidecarDeviceId(settings.device);
+
+  if (!preferGpu && HEAVY_CPU_MODELS.has(model)) {
+    return;
+  }
+
+  // Mark started up-front so overlapping triggers do not double-warm; reset on
+  // a skip/failure so a later trigger (e.g. after the model finishes
+  // downloading, or after a settings change) can retry.
+  prewarmStarted = true;
+  try {
+    const warmed = await getLocalTranscriptionSidecarManager().warmUp({
+      model,
+      preferGpu,
+      deviceId,
+    });
+
+    if (warmed) {
+      getLogger().info(
+        `[prewarm] local transcription warm (model=${model}, gpu=${preferGpu})`,
+      );
+    } else {
+      getLogger().info(
+        `[prewarm] skipped: model '${model}' is not downloaded yet`,
+      );
+      prewarmStarted = false;
+    }
+  } catch (error) {
+    getLogger().warning(
+      `[prewarm] local transcription warmup failed (non-fatal): ${error}`,
+    );
+    prewarmStarted = false;
+  }
+};
 
 const getPreferGpu = (state: AppState): boolean =>
   isGpuPreferredTranscriptionDevice(state.settings.aiTranscription.device);

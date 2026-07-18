@@ -170,7 +170,7 @@ export const KeybindingsForm = () => {
       </Typography>
 
       <Box
-        sx={{
+        sx={(theme) => ({
           bgcolor: "level2",
           borderRadius: 2,
           p: 3,
@@ -185,13 +185,13 @@ export const KeybindingsForm = () => {
           }),
           "@keyframes borderPulse": {
             "0%, 100%": {
-              borderColor: "#1976d2",
+              borderColor: theme.vars?.palette.blueHover,
             },
             "50%": {
-              borderColor: "#90caf9",
+              borderColor: theme.vars?.palette.blue,
             },
           },
-        }}
+        })}
       >
         {isListening ? (
           keysHeld.length > 0 ? (

@@ -81,12 +81,12 @@ export const BouncyTooltip = ({
       }}
     >
       <Box
-        sx={{
+        sx={(theme) => ({
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          filter: "drop-shadow(0 4px 8px rgba(0, 0, 0, 0.2))",
-        }}
+          filter: `drop-shadow(0 4px 8px ${theme.vars?.palette.shadow})`,
+        })}
       >
         <Box
           sx={{
