@@ -1,4 +1,4 @@
-import { Stack, Typography } from "@mui/material";
+import { Box, Stack, Typography } from "@mui/material";
 import { useCallback } from "react";
 import { FormattedMessage, useIntl } from "react-intl";
 import { loadTones, setActiveTone } from "../../actions/tone.actions";
@@ -9,6 +9,44 @@ import { ScrollListPage } from "../common/ScrollListPage";
 import { ToneSelect } from "../tones/ToneSelect";
 import { PostProcessingDisabledTooltip } from "./PostProcessingDisabledTooltip";
 import { AppStylingRow } from "./AppStylingRow";
+
+function HowItWorksStep({
+  index,
+  children,
+}: {
+  index: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <Stack direction="row" spacing={1.5} alignItems="flex-start">
+      <Box
+        sx={{
+          width: 22,
+          height: 22,
+          flexShrink: 0,
+          mt: 0.25,
+          borderRadius: "50%",
+          bgcolor: "level2",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 12,
+          fontWeight: 700,
+          color: "text.secondary",
+        }}
+      >
+        {index}
+      </Box>
+      <Typography
+        variant="body2"
+        color="text.secondary"
+        sx={{ textAlign: "left" }}
+      >
+        {children}
+      </Typography>
+    </Stack>
+  );
+}
 
 export function AppStylingLayout() {
   const intl = useIntl();
@@ -58,24 +96,24 @@ export function AppStylingLayout() {
       renderItem={(id) => <AppStylingRow key={id} id={id} />}
       emptyState={
         <Stack
-          spacing={1}
-          alignItems="flex-start"
-          width={300}
-          alignSelf="center"
-          mx="auto"
+          spacing={2}
+          alignItems="center"
+          sx={{ maxWidth: 340, mx: "auto" }}
         >
-          <Typography variant="h6">
+          <Typography variant="h6" color="text.secondary">
             <FormattedMessage defaultMessage="How it works" />
           </Typography>
-          <Typography variant="body2">
-            <FormattedMessage defaultMessage="1. Open up the app you want to style (like Slack or Chrome)." />
-          </Typography>
-          <Typography variant="body2">
-            <FormattedMessage defaultMessage='2. Click on the OS Voice icon in the menu bar, and click "Register this app".' />
-          </Typography>
-          <Typography variant="body2">
-            <FormattedMessage defaultMessage="3. Go back to OS Voice, and select a writing style for that app." />
-          </Typography>
+          <Stack spacing={1.5} sx={{ width: "100%" }}>
+            <HowItWorksStep index={1}>
+              <FormattedMessage defaultMessage="Open up the app you want to style (like Slack or Chrome)." />
+            </HowItWorksStep>
+            <HowItWorksStep index={2}>
+              <FormattedMessage defaultMessage='Click on the OS Voice icon in the menu bar, and click "Register this app".' />
+            </HowItWorksStep>
+            <HowItWorksStep index={3}>
+              <FormattedMessage defaultMessage="Go back to OS Voice, and select a writing style for that app." />
+            </HowItWorksStep>
+          </Stack>
         </Stack>
       }
     />

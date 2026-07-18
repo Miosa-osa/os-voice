@@ -1,7 +1,11 @@
 import dayjs from "dayjs";
 import { Term, Transcription } from "@voquill/types";
 import { LocalDictationEvent } from "../../repos/insights.repo";
-import { AiVoiceProfile } from "./profile.types";
+import {
+  AiVoiceProfile,
+  CoachingSnapshot,
+  StoredVoiceProfile,
+} from "./profile.types";
 
 export type UsageCategory = "AI prompts" | "Coding" | "Writing" | "Other";
 export type HeatmapCell = { date: string; words: number; level: number };
@@ -667,15 +671,384 @@ export const computeLeaderboard = (
   return { records, topApps };
 };
 
-export const templatedProfile = (base: VoiceProfile): AiVoiceProfile => ({
-  name: base.name,
-  identity: base.description,
-  traits: [],
-  topics: [],
-  style: "",
-  quirks: [],
-  generated: false,
-});
+const capitalizeWord = (w: string): string =>
+  w.length ? w.charAt(0).toUpperCase() + w.slice(1) : w;
+
+// A frequency pass over the transcripts (minus stopwords) that also tracks
+// how many distinct dictations each word appeared in, so we can distinguish
+// "said once a lot in one rant" from "comes up across many sessions".
+const domainWordCounts = (
+  transcriptions: Transcription[],
+): Map<string, { count: number; docs: Set<string> }> => {
+  const counts = new Map<string, { count: number; docs: Set<string> }>();
+  for (const t of activeTranscriptions(transcriptions)) {
+    for (const w of tokenize(t.transcript)) {
+      if (w.length < 4 || STOPWORDS.has(w)) continue;
+      const entry = counts.get(w) ?? { count: 0, docs: new Set<string>() };
+      entry.count += 1;
+      entry.docs.add(t.id);
+      counts.set(w, entry);
+    }
+  }
+  return counts;
+};
+
+// Compute-backed fallback for "topics": the top recurring domain words,
+// purely from word frequency — no LLM required.
+export const deriveTopics = (
+  transcriptions: Transcription[],
+  limit = 6,
+): string[] => {
+  const counts = domainWordCounts(transcriptions);
+  return Array.from(counts.entries())
+    .filter(([, v]) => v.count >= 3)
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, limit)
+    .map(([word]) => capitalizeWord(word));
+};
+
+// The most frequent distinctive terms, verbatim and lowercase (as they were
+// spoken), for the "ubiquitous language" chip row.
+export const deriveUbiquitousLanguage = (
+  transcriptions: Transcription[],
+  limit = 10,
+): string[] => {
+  const counts = domainWordCounts(transcriptions);
+  return Array.from(counts.entries())
+    .filter(([, v]) => v.count >= 2)
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, limit)
+    .map(([word]) => word);
+};
+
+// Terms that recur across multiple distinct dictations (not just repeated in
+// one rant) are a better signal for "what you care about" than raw frequency.
+export const deriveWhatYouCareAbout = (
+  transcriptions: Transcription[],
+  limit = 6,
+): string[] => {
+  const counts = domainWordCounts(transcriptions);
+  return Array.from(counts.entries())
+    .filter(([, v]) => v.docs.size >= 2)
+    .sort((a, b) => b[1].docs.size - a[1].docs.size || b[1].count - a[1].count)
+    .slice(0, limit)
+    .map(([word]) => capitalizeWord(word));
+};
+
+// Compute-backed fallback for "quirks": short, chip-friendly habits derived
+// directly from the measured stats, so this section is never empty offline.
+export const deriveQuirks = (words: WordAnalysis): string[] => {
+  const quirks: string[] = [];
+  if (words.fillerRate >= 6) {
+    quirks.push("Frequent filler words");
+  } else if (words.fillerRate <= 1.5) {
+    quirks.push("Rarely uses filler words");
+  }
+  if (words.avgSentenceLength > 24) {
+    quirks.push("Long, flowing sentences");
+  } else if (words.avgSentenceLength > 0 && words.avgSentenceLength < 6) {
+    quirks.push("Short, punchy sentences");
+  }
+  if (words.questionRatio >= 25) {
+    quirks.push("Frames things as questions");
+  }
+  if (words.vocabularySize >= 800) {
+    quirks.push("Wide-ranging vocabulary");
+  }
+  if (words.topPhrases.length > 0) {
+    quirks.push(`Repeats "${words.topPhrases[0].phrase}"`);
+  }
+  return quirks.slice(0, 4);
+};
+
+// A data-derived "how you speak" sentence — real linguistic analysis from the
+// measured stats, so this section isn't empty when the LLM is unavailable.
+export const deriveHowYouSpeak = (
+  words: WordAnalysis,
+  profile: VoiceProfile,
+): string => {
+  const pace = profile.peakHourLabel
+    ? ` most often around ${profile.peakHourLabel}`
+    : "";
+  const fillerBit =
+    words.fillerRate >= 6
+      ? `with a fair number of filler words (~${words.fillerRate} per 100)`
+      : words.fillerRate <= 1.5
+        ? `with very few filler words (~${words.fillerRate} per 100)`
+        : `with a moderate amount of filler words (~${words.fillerRate} per 100)`;
+  const lengthBit =
+    words.avgSentenceLength > 20
+      ? `in long, layered sentences (~${words.avgSentenceLength} words)`
+      : words.avgSentenceLength > 0 && words.avgSentenceLength < 6
+        ? `in short, direct bursts (~${words.avgSentenceLength} words)`
+        : `in clear, well-paced sentences (~${words.avgSentenceLength} words)`;
+  const questionBit =
+    words.questionRatio >= 25
+      ? `, and you ask a lot of questions (${words.questionRatio}% of sentences)`
+      : "";
+  return `You speak${pace} ${lengthBit}, ${fillerBit}${questionBit}.`;
+};
+
+// A 2-3 sentence, data-grounded "portrait" — no invented biography, just a
+// read of the measured pace/clarity/questioning signals plus the topics the
+// person actually keeps returning to.
+export const derivePortrait = (
+  words: WordAnalysis,
+  topics: string[],
+): string => {
+  const paceDescriptor =
+    words.avgSentenceLength > 22
+      ? "expansive"
+      : words.avgSentenceLength > 0 && words.avgSentenceLength < 8
+        ? "direct"
+        : "measured";
+  const topicsBit =
+    topics.length > 0
+      ? ` who keeps returning to ${topics.slice(0, 3).join(", ")}`
+      : "";
+  const fillerBit =
+    words.fillerRate <= 2
+      ? "You speak with unusual clarity, rarely reaching for filler words."
+      : words.fillerRate >= 6
+        ? "You speak loosely and conversationally, thinking out loud as you go."
+        : "You speak in a steady, natural rhythm.";
+  const questionBit =
+    words.questionRatio >= 20
+      ? " You ask a lot of questions along the way — curiosity shows up in how you talk, not just what you say."
+      : "";
+  return `You're a ${paceDescriptor} communicator${topicsBit}. ${fillerBit}${questionBit}`;
+};
+
+// Personality traits derived only from measurable speech signals — no
+// fabricated psychology, just what the numbers actually support.
+export const derivePersonality = (words: WordAnalysis): string[] => {
+  const traits: string[] = [];
+  if (words.fillerRate <= 2) traits.push("Articulate");
+  if (words.questionRatio >= 20) traits.push("Inquisitive");
+  if (words.avgSentenceLength > 22) {
+    traits.push("Expansive");
+  } else if (words.avgSentenceLength > 0 && words.avgSentenceLength < 8) {
+    traits.push("Direct");
+  }
+  if (words.vocabularySize >= 600) traits.push("Wide-ranging thinker");
+  if (traits.length === 0 && words.avgSentenceLength > 0) {
+    traits.push("Steady and consistent");
+  }
+  return traits.slice(0, 4);
+};
+
+// Modest, topic-grounded motivations — what someone talks about repeatedly is
+// the best offline signal we have for what drives them.
+export const deriveMotivations = (topics: string[]): string[] =>
+  topics
+    .slice(0, 3)
+    .map((topic) => `Building and moving things forward on ${topic}`);
+
+// Picks the single strongest measured stat and phrases it as the person's
+// standout communication trait.
+export const deriveCommunicationSuperpower = (
+  words: WordAnalysis,
+): string | undefined => {
+  const candidates: { score: number; text: string }[] = [];
+  if (words.fillerRate <= 2) {
+    candidates.push({
+      score: (3 - words.fillerRate) * 10,
+      text: `Clarity — you speak with almost no filler words (~${words.fillerRate} per 100), so your point lands clean.`,
+    });
+  }
+  if (words.avgSentenceLength >= 6 && words.avgSentenceLength <= 20) {
+    candidates.push({
+      score: 15,
+      text: `Pacing — your sentences (~${words.avgSentenceLength} words) are easy to follow without losing depth.`,
+    });
+  }
+  if (words.vocabularySize >= 500) {
+    candidates.push({
+      score: words.vocabularySize / 50,
+      text: `Range — a vocabulary of ${words.vocabularySize.toLocaleString()} distinct words gives you precise language for nuance.`,
+    });
+  }
+  if (words.questionRatio >= 20) {
+    candidates.push({
+      score: words.questionRatio,
+      text: `Curiosity — ${words.questionRatio}% of what you say is framed as a question, drawing others into the conversation.`,
+    });
+  }
+  if (candidates.length === 0) return undefined;
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0].text;
+};
+
+// Kind, honest read of weak stats — every line is anchored to a real number,
+// never a vague personality judgment.
+export const deriveBlindSpots = (words: WordAnalysis): string[] => {
+  const spots: string[] = [];
+  if (words.fillerRate >= 6) {
+    spots.push(
+      `Filler words creep in fairly often (~${words.fillerRate} per 100) — they can dilute a strong point.`,
+    );
+  }
+  if (words.avgSentenceLength > 26) {
+    spots.push(
+      `Sentences can run long (~${words.avgSentenceLength} words), which sometimes buries the headline.`,
+    );
+  }
+  if (words.questionRatio >= 35) {
+    spots.push(
+      `A lot of your phrasing comes out as questions (${words.questionRatio}%) — it can read as less certain than you actually are.`,
+    );
+  }
+  if (words.vocabularySize > 0 && words.vocabularySize < 150) {
+    spots.push(
+      "Vocabulary is still narrow in the sample so far — it may read as repetitive until there's more data.",
+    );
+  }
+  return spots.slice(0, 3);
+};
+
+// A short, grounded read on how the measured pace/clarity likely comes
+// across to a listener. Returns undefined when there's no real signal yet.
+export const deriveHowOthersExperienceYou = (
+  words: WordAnalysis,
+): string | undefined => {
+  if (words.avgSentenceLength === 0) return undefined;
+  const tone =
+    words.fillerRate <= 2
+      ? "composed and deliberate"
+      : words.fillerRate >= 6
+        ? "casual and unfiltered"
+        : "relaxed but clear";
+  const pacing =
+    words.avgSentenceLength > 22
+      ? "with a lot of context and detail"
+      : words.avgSentenceLength < 8
+        ? "in short, punchy bursts"
+        : "at an easy, conversational pace";
+  return `People likely experience you as ${tone}, speaking ${pacing}.`;
+};
+
+// Recurring cognitive/thinking patterns, inferred from question-asking,
+// sentence structure, and topic persistence. Returns an empty list rather
+// than inventing patterns when there's no real signal.
+export const deriveMindsetPatterns = (
+  words: WordAnalysis,
+  topics: string[],
+): string[] => {
+  const patterns: string[] = [];
+  if (words.questionRatio >= 20) {
+    patterns.push(
+      "You think out loud by questioning — testing ideas as you speak them.",
+    );
+  }
+  if (words.avgSentenceLength > 22) {
+    patterns.push(
+      "You build ideas layer by layer instead of stating the conclusion upfront.",
+    );
+  }
+  if (topics.length >= 3) {
+    patterns.push(
+      `You circle back to a consistent set of themes — ${topics.slice(0, 3).join(", ")} — across sessions.`,
+    );
+  }
+  return patterns.slice(0, 3);
+};
+
+// Compute-backed fallback profile: derives real topics, quirks, and a
+// "how you speak" read purely from the measured data, so the deep sections of
+// the profile aren't empty when the LLM is unavailable or liteMode is on.
+export const templatedProfile = (
+  base: VoiceProfile,
+  transcriptions: Transcription[],
+  words?: WordAnalysis,
+): AiVoiceProfile => {
+  const analysis = words ?? computeWordAnalysis(transcriptions);
+  const topics = deriveTopics(transcriptions);
+  const personality = derivePersonality(analysis);
+  const motivations = deriveMotivations(topics);
+  const blindSpots = deriveBlindSpots(analysis);
+  const mindsetPatterns = deriveMindsetPatterns(analysis, topics);
+  return {
+    name: base.name,
+    identity: base.description,
+    traits: [],
+    topics,
+    style: "",
+    quirks: deriveQuirks(analysis),
+    howYouSpeak: deriveHowYouSpeak(analysis, base),
+    whatYouCareAbout: deriveWhatYouCareAbout(transcriptions),
+    ubiquitousLanguage: deriveUbiquitousLanguage(transcriptions),
+    portrait: derivePortrait(analysis, topics),
+    personality: personality.length > 0 ? personality : undefined,
+    motivations: motivations.length > 0 ? motivations : undefined,
+    communicationSuperpower: deriveCommunicationSuperpower(analysis),
+    blindSpots: blindSpots.length > 0 ? blindSpots : undefined,
+    howOthersExperienceYou: deriveHowOthersExperienceYou(analysis),
+    mindsetPatterns: mindsetPatterns.length > 0 ? mindsetPatterns : undefined,
+    coaching: templatedCoaching(analysis),
+    generated: false,
+  };
+};
+
+// A grounded, offline coaching fallback derived purely from the measured stats,
+// so the Coaching card still says something honest and specific when the LLM is
+// unavailable. Every line is anchored to a real number.
+export const templatedCoaching = (
+  words: WordAnalysis,
+): AiVoiceProfile["coaching"] => {
+  const strengths: string[] = [];
+  const growthAreas: string[] = [];
+  const suggestions: string[] = [];
+
+  if (words.fillerRate <= 3) {
+    strengths.push(
+      `Low filler rate — about ${words.fillerRate} filler words per 100, so you sound deliberate.`,
+    );
+  } else if (words.fillerRate >= 6) {
+    growthAreas.push(
+      `Filler words are frequent (~${words.fillerRate} per 100). Trimming "um", "like" and "basically" would sharpen you up.`,
+    );
+    suggestions.push(
+      "Pause silently instead of filling gaps — a beat of quiet reads as confidence.",
+    );
+  }
+
+  if (words.avgSentenceLength >= 6 && words.avgSentenceLength <= 20) {
+    strengths.push(
+      `Well-balanced sentences (~${words.avgSentenceLength} words) that are easy to follow.`,
+    );
+  } else if (words.avgSentenceLength > 24) {
+    growthAreas.push(
+      `Sentences run long (~${words.avgSentenceLength} words on average), which can bury your point.`,
+    );
+    suggestions.push(
+      "Break long thoughts into two shorter sentences — say the point, then the reason.",
+    );
+  } else if (words.avgSentenceLength > 0 && words.avgSentenceLength < 6) {
+    growthAreas.push(
+      `Sentences are very short (~${words.avgSentenceLength} words) — adding a little connective tissue can help them flow.`,
+    );
+  }
+
+  if (words.vocabularySize >= 400) {
+    strengths.push(
+      `Rich vocabulary — ${words.vocabularySize} distinct words across your dictations.`,
+    );
+  }
+
+  if (words.questionRatio >= 30) {
+    growthAreas.push(
+      `A lot of what you say is phrased as questions (${words.questionRatio}%). Stating things directly can land with more authority.`,
+    );
+  }
+
+  if (suggestions.length === 0) {
+    suggestions.push(
+      "Keep going — re-run this after more dictation for a sharper read on your speaking.",
+    );
+  }
+
+  return { strengths, growthAreas, suggestions };
+};
 
 export const sampleTranscripts = (
   transcriptions: Transcription[],
@@ -761,6 +1134,149 @@ export const computeWordAnalysis = (
   };
 };
 
+export type RecentDictationsSummary = {
+  count: number;
+  words: WordAnalysis;
+};
+
+// An aggregate "review across your recent dictations" — computed entirely
+// from local stats over the last N transcripts, no LLM call needed. Used to
+// complement the one-shot per-transcript review with a rolling read.
+export const computeRecentDictationsSummary = (
+  transcriptions: Transcription[],
+  n = 20,
+): RecentDictationsSummary | null => {
+  const recent = activeTranscriptions(transcriptions)
+    .slice()
+    .sort((a, b) => dayjs(b.createdAt).valueOf() - dayjs(a.createdAt).valueOf())
+    .slice(0, n);
+  if (recent.length === 0) return null;
+  return { count: recent.length, words: computeWordAnalysis(recent) };
+};
+
+// A trend item: a grounded, numbers-backed observation plus whether it's
+// good news ("positive") or worth attention ("negative").
+export type CoachingTrendItem = {
+  text: string;
+  direction: "positive" | "negative";
+};
+
+export type CoachingTrend = {
+  fillerRateDeltaPct: number | null;
+  avgSentenceLengthDeltaPct: number | null;
+  vocabularySizeDeltaPct: number | null;
+  questionRatioDeltaPct: number | null;
+  wpmDeltaPct: number | null;
+  fillerPoints: TrendPoint[];
+  summary: CoachingTrendItem[];
+};
+
+// Turns the persisted per-generation stat snapshots (see StoredVoiceProfile)
+// into a "did I improve?" trend: real deltas grounded in the measured numbers,
+// not vibes. Requires at least two generations with recorded stats.
+export const computeCoachingTrend = (
+  history: StoredVoiceProfile[],
+): CoachingTrend | null => {
+  const withStats = history
+    .filter(
+      (h): h is StoredVoiceProfile & { stats: CoachingSnapshot } => !!h.stats,
+    )
+    .slice()
+    .sort((a, b) => a.createdAt - b.createdAt);
+  if (withStats.length < 2) return null;
+
+  const first = withStats[0].stats;
+  const last = withStats[withStats.length - 1].stats;
+
+  const pctDelta = (a: number, b: number): number | null =>
+    a === 0 ? null : Math.round(((b - a) / a) * 1000) / 10;
+
+  const fillerRateDeltaPct = pctDelta(first.fillerRate, last.fillerRate);
+  const avgSentenceLengthDeltaPct = pctDelta(
+    first.avgSentenceLength,
+    last.avgSentenceLength,
+  );
+  const vocabularySizeDeltaPct = pctDelta(
+    first.vocabularySize,
+    last.vocabularySize,
+  );
+  const questionRatioDeltaPct = pctDelta(
+    first.questionRatio,
+    last.questionRatio,
+  );
+  const wpmDeltaPct = pctDelta(first.wpm, last.wpm);
+
+  const summary: CoachingTrendItem[] = [];
+  if (fillerRateDeltaPct !== null) {
+    if (fillerRateDeltaPct <= -10) {
+      summary.push({
+        text: `Filler words down ${Math.abs(fillerRateDeltaPct)}% since your first profile.`,
+        direction: "positive",
+      });
+    } else if (fillerRateDeltaPct >= 10) {
+      summary.push({
+        text: `Filler words up ${fillerRateDeltaPct}% since your first profile — worth reining back in.`,
+        direction: "negative",
+      });
+    }
+  }
+  if (avgSentenceLengthDeltaPct !== null) {
+    const wasExtreme =
+      first.avgSentenceLength > 24 ||
+      (first.avgSentenceLength > 0 && first.avgSentenceLength < 6);
+    const isBalanced =
+      last.avgSentenceLength >= 6 && last.avgSentenceLength <= 20;
+    if (wasExtreme && isBalanced) {
+      summary.push({
+        text: "Your sentences are getting clearer and more balanced.",
+        direction: "positive",
+      });
+    } else if (avgSentenceLengthDeltaPct >= 30 && last.avgSentenceLength > 24) {
+      summary.push({
+        text: `Sentences are running ${avgSentenceLengthDeltaPct}% longer than when you started.`,
+        direction: "negative",
+      });
+    }
+  }
+  if (vocabularySizeDeltaPct !== null && vocabularySizeDeltaPct >= 10) {
+    summary.push({
+      text: `Vocabulary is up ${vocabularySizeDeltaPct}% — you're drawing on more words.`,
+      direction: "positive",
+    });
+  }
+  if (
+    questionRatioDeltaPct !== null &&
+    last.questionRatio >= 30 &&
+    questionRatioDeltaPct >= 20
+  ) {
+    summary.push({
+      text: `You're phrasing more as questions (${last.questionRatio}% of sentences) — stating things directly can land with more authority.`,
+      direction: "negative",
+    });
+  }
+  if (wpmDeltaPct !== null && wpmDeltaPct >= 10 && last.wpm > 0) {
+    summary.push({
+      text: `Speaking pace is up ${wpmDeltaPct}% since your first profile.`,
+      direction: "positive",
+    });
+  }
+
+  const fillerPoints: TrendPoint[] = withStats.map((h) => ({
+    label: dayjs(h.createdAt).format("MMM D"),
+    value: h.stats.fillerRate,
+  }));
+
+  return {
+    fillerRateDeltaPct,
+    avgSentenceLengthDeltaPct,
+    vocabularySizeDeltaPct,
+    questionRatioDeltaPct,
+    wpmDeltaPct,
+    fillerPoints,
+    summary,
+  };
+};
+
 export type UsageExtras = {
   hourHistogram: number[];
   perApp: { app: string; words: number; count: number; avgLength: number }[];
@@ -813,13 +1329,33 @@ export const computeUsageExtras = (
   return { hourHistogram, perApp, bestDay, dailyTrend };
 };
 
+export type AchievementTier = "bronze" | "silver" | "gold" | "platinum";
+
 export type Achievement = {
   key: string;
   label: string;
   description: string;
   unlocked: boolean;
   progress: number;
+  // Optional for backward compatibility with any consumer that doesn't set
+  // them; render code should default to "bronze" / a generic trophy emoji.
+  tier?: AchievementTier;
+  emoji?: string;
 };
+
+// Cheap script-range detection (not real language ID) used only as a fun
+// "Polyglot" signal — presence of non-Latin scripts alongside Latin text.
+const SCRIPT_PATTERNS: RegExp[] = [
+  /[Ѐ-ӿ]/, // Cyrillic
+  /[一-鿿぀-ヿ가-힯]/, // CJK / Kana / Hangul
+  /[؀-ۿ]/, // Arabic
+  /[ऀ-ॿ]/, // Devanagari
+  /[Ͱ-Ͽ]/, // Greek
+  /[֐-׿]/, // Hebrew
+];
+
+const countScripts = (text: string): number =>
+  1 + SCRIPT_PATTERNS.filter((re) => re.test(text)).length;
 
 export const computeAchievements = (
   events: LocalDictationEvent[],
@@ -834,28 +1370,70 @@ export const computeAchievements = (
   }
   const mostInDay = Math.max(0, ...Array.from(byDay.values()));
 
+  let nightWords = 0;
+  let earlyWords = 0;
+  let weekendWords = 0;
+  let marathon = 0;
+  let allText = "";
+  for (const t of active) {
+    const d = dayjs(t.createdAt);
+    const h = d.hour();
+    const w = transcriptWords(t);
+    if (h < 5) nightWords += w;
+    if (h >= 5 && h < 8) earlyWords += w;
+    if (d.day() === 0 || d.day() === 6) weekendWords += w;
+    if (w > marathon) marathon = w;
+    allText += ` ${t.transcript}`;
+  }
+  const activeDays = byDay.size;
+  const vocab = computeWordAnalysis(transcriptions).vocabularySize;
+  const scripts = countScripts(allText);
+
   const goal = (
     key: string,
     label: string,
     description: string,
     value: number,
     target: number,
+    tier: AchievementTier = "bronze",
+    emoji = "🏆",
   ): Achievement => ({
     key,
     label,
     description,
     unlocked: value >= target,
     progress: Math.max(0, Math.min(1, value / target)),
+    tier,
+    emoji,
   });
 
   return [
-    goal("w1k", "First 1,000", "Dictate 1,000 words", usage.totalWords, 1000),
+    goal(
+      "w1k",
+      "First 1,000",
+      "Dictate 1,000 words",
+      usage.totalWords,
+      1000,
+      "bronze",
+      "🌱",
+    ),
     goal(
       "w10k",
       "First 10k",
       "Reach your first 10,000-word milestone",
       usage.totalWords,
       10000,
+      "bronze",
+      "📈",
+    ),
+    goal(
+      "w25k",
+      "25k club",
+      "Dictate 25,000 words",
+      usage.totalWords,
+      25000,
+      "silver",
+      "🚀",
     ),
     goal(
       "w50k",
@@ -863,6 +1441,8 @@ export const computeAchievements = (
       "Dictate 50,000 words",
       usage.totalWords,
       50000,
+      "silver",
+      "📗",
     ),
     goal(
       "novel",
@@ -870,6 +1450,35 @@ export const computeAchievements = (
       "Dictate a full novel (90,000 words)",
       usage.totalWords,
       AVG_NOVEL_WORDS,
+      "gold",
+      "📚",
+    ),
+    goal(
+      "w100k",
+      "Six figures",
+      "Dictate 100,000 words",
+      usage.totalWords,
+      100000,
+      "gold",
+      "💯",
+    ),
+    goal(
+      "w250k",
+      "Quarter million",
+      "Dictate 250,000 words",
+      usage.totalWords,
+      250000,
+      "platinum",
+      "💎",
+    ),
+    goal(
+      "s3",
+      "Getting started",
+      "Dictate 3 days in a row",
+      usage.longestStreak,
+      3,
+      "bronze",
+      "🔥",
     ),
     goal(
       "s7",
@@ -877,9 +1486,180 @@ export const computeAchievements = (
       "Dictate 7 days in a row",
       usage.longestStreak,
       7,
+      "bronze",
+      "🔥",
     ),
-    goal("s30", "Monthly habit", "30-day streak", usage.longestStreak, 30),
-    goal("bigday", "Big day", "1,000 words in a single day", mostInDay, 1000),
+    goal(
+      "s30",
+      "Monthly habit",
+      "30-day streak",
+      usage.longestStreak,
+      30,
+      "silver",
+      "🗓️",
+    ),
+    goal(
+      "s100",
+      "Century",
+      "100-day streak",
+      usage.longestStreak,
+      100,
+      "gold",
+      "🏆",
+    ),
+    goal(
+      "s365",
+      "Unstoppable",
+      "365-day streak",
+      usage.longestStreak,
+      365,
+      "platinum",
+      "👑",
+    ),
+    goal(
+      "bigday",
+      "Big day",
+      "1,000 words in a single day",
+      mostInDay,
+      1000,
+      "bronze",
+      "☀️",
+    ),
+    goal(
+      "monsterday",
+      "Monster day",
+      "5,000 words in a single day",
+      mostInDay,
+      5000,
+      "gold",
+      "🌋",
+    ),
+    goal(
+      "night",
+      "Night owl",
+      "Dictate 500 words after midnight",
+      nightWords,
+      500,
+      "bronze",
+      "🦉",
+    ),
+    goal(
+      "early",
+      "Early bird",
+      "Dictate 500 words before 8am",
+      earlyWords,
+      500,
+      "bronze",
+      "🐦",
+    ),
+    goal(
+      "weekend",
+      "Weekend warrior",
+      "Dictate 2,000 words on weekends",
+      weekendWords,
+      2000,
+      "bronze",
+      "🎉",
+    ),
+    goal(
+      "marathon",
+      "Marathon",
+      "300 words in a single dictation",
+      marathon,
+      300,
+      "bronze",
+      "🏃",
+    ),
+    goal(
+      "ultramarathon",
+      "Ultramarathon",
+      "1,000 words in a single dictation",
+      marathon,
+      1000,
+      "silver",
+      "🏔️",
+    ),
+    goal(
+      "regular",
+      "Regular",
+      "Dictate on 30 different days",
+      activeDays,
+      30,
+      "silver",
+      "📅",
+    ),
+    goal(
+      "centuryDays",
+      "Century of days",
+      "Dictate on 100 different days",
+      activeDays,
+      100,
+      "gold",
+      "🗓️",
+    ),
+    goal(
+      "fullYear",
+      "Full year",
+      "Dictate on 365 different days",
+      activeDays,
+      365,
+      "platinum",
+      "🎊",
+    ),
+    goal(
+      "wordCollector",
+      "Word collector",
+      "Use 500 distinct words",
+      vocab,
+      500,
+      "bronze",
+      "🧩",
+    ),
+    goal(
+      "wordsmith",
+      "Wordsmith",
+      "Use 2,000 distinct words",
+      vocab,
+      2000,
+      "silver",
+      "📖",
+    ),
+    goal(
+      "logophile",
+      "Logophile",
+      "Use 5,000 distinct words",
+      vocab,
+      5000,
+      "gold",
+      "🎓",
+    ),
+    goal(
+      "speedster",
+      "Speed demon",
+      "Average 160+ words per minute",
+      usage.wpm,
+      160,
+      "silver",
+      "⚡",
+    ),
+    goal(
+      "monthlyGrind",
+      "Monthly grind",
+      "Dictate 5,000 words this month",
+      usage.wordsThisMonth,
+      5000,
+      "silver",
+      "📆",
+    ),
+    goal(
+      "polyglot",
+      "Polyglot",
+      "Dictate in more than one script or language",
+      scripts,
+      2,
+      "gold",
+      "🌍",
+    ),
   ];
 };
 
@@ -1144,5 +1924,405 @@ export const computeDayDetail = (
     minutes: Math.round(minutes),
     dictations: onDay.length,
     topApp: topEntry(appWords),
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Deeper "Your usage" analysis: rhythm/consistency, session shape, week over
+// week momentum, editing efficiency, and richer milestone projections. These
+// are additive read-only views over events/transcriptions and don't change
+// any of the stats consumed by the coaching/profile side of insights.
+// ---------------------------------------------------------------------------
+
+export type Chronotype = "morning" | "afternoon" | "evening" | "night";
+
+export type Rhythm = {
+  /** Words dictated per weekday, index 0 = Sunday .. 6 = Saturday. */
+  weekdayBars: number[];
+  /** Words dictated per hour of day, index 0-23. */
+  hourBars: number[];
+  peakWeekdayLabel: string | null;
+  peakHourLabel: string | null;
+  chronotype: Chronotype | null;
+  /** 0-100: how evenly spread out (vs. bursty) your dictation habit is. */
+  consistencyScore: number;
+};
+
+export const computeRhythm = (transcriptions: Transcription[]): Rhythm => {
+  const active = activeTranscriptions(transcriptions);
+  const weekdayBars = Array.from({ length: 7 }, () => 0);
+  const hourBars = Array.from({ length: 24 }, () => 0);
+  const byDay = new Map<string, number>();
+
+  for (const t of active) {
+    const d = dayjs(t.createdAt);
+    const words = transcriptWords(t);
+    weekdayBars[d.day()] += words;
+    hourBars[d.hour()] += words;
+    const key = d.format("YYYY-MM-DD");
+    byDay.set(key, (byDay.get(key) ?? 0) + words);
+  }
+
+  const hasActivity = active.length > 0;
+  const peakWeekdayIdx = weekdayBars.reduce(
+    (best, v, i) => (v > weekdayBars[best] ? i : best),
+    0,
+  );
+  const peakHourIdx = hourBars.reduce(
+    (best, v, i) => (v > hourBars[best] ? i : best),
+    0,
+  );
+  const peakWeekdayLabel = hasActivity ? WEEKDAYS[peakWeekdayIdx] : null;
+  const peakHourLabel = hasActivity ? hourLabel(peakHourIdx) : null;
+
+  let chronotype: Chronotype | null = null;
+  if (hasActivity) {
+    if (peakHourIdx >= 5 && peakHourIdx < 12) chronotype = "morning";
+    else if (peakHourIdx >= 12 && peakHourIdx < 17) chronotype = "afternoon";
+    else if (peakHourIdx >= 17 && peakHourIdx < 22) chronotype = "evening";
+    else chronotype = "night";
+  }
+
+  // Consistency blends two signals over a rolling window (capped to how long
+  // the user has actually been dictating): how many days they show up
+  // (spread) and how even their daily output is when they do (evenness).
+  const WINDOW_DAYS = 60;
+  let firstDay: dayjs.Dayjs | null = null;
+  for (const t of active) {
+    const d = dayjs(t.createdAt);
+    if (!firstDay || d.isBefore(firstDay)) firstDay = d;
+  }
+  const cutoff = dayjs()
+    .subtract(WINDOW_DAYS - 1, "day")
+    .startOf("day");
+  const windowStart =
+    firstDay && firstDay.isAfter(cutoff) ? firstDay.startOf("day") : cutoff;
+  const windowDays = Math.max(1, dayjs().diff(windowStart, "day") + 1);
+
+  const dailyCounts: number[] = [];
+  for (let i = 0; i < windowDays; i++) {
+    const key = windowStart.add(i, "day").format("YYYY-MM-DD");
+    dailyCounts.push(byDay.get(key) ?? 0);
+  }
+  const activeDaysInWindow = dailyCounts.filter((v) => v > 0).length;
+  const spread = activeDaysInWindow / windowDays;
+
+  const activeCounts = dailyCounts.filter((v) => v > 0);
+  let evenness = 0;
+  if (activeCounts.length > 0) {
+    const mean = activeCounts.reduce((a, b) => a + b, 0) / activeCounts.length;
+    const variance =
+      activeCounts.reduce((a, b) => a + (b - mean) ** 2, 0) /
+      activeCounts.length;
+    const cv = mean > 0 ? Math.sqrt(variance) / mean : 0;
+    evenness = Math.max(0, 1 - Math.min(1, cv));
+  }
+  const consistencyScore = hasActivity
+    ? Math.round(((spread + evenness) / 2) * 100)
+    : 0;
+
+  return {
+    weekdayBars,
+    hourBars,
+    peakWeekdayLabel,
+    peakHourLabel,
+    chronotype,
+    consistencyScore,
+  };
+};
+
+export type SessionStats = {
+  avgWordsPerSession: number;
+  medianWordsPerSession: number;
+  longestSessionWords: number;
+  longestSessionDate: string | null;
+  sessionsPerActiveDay: number;
+  wordsPerSessionWeekly: TrendPoint[];
+};
+
+export const computeSessionStats = (
+  transcriptions: Transcription[],
+): SessionStats => {
+  const active = activeTranscriptions(transcriptions);
+  if (active.length === 0) {
+    return {
+      avgWordsPerSession: 0,
+      medianWordsPerSession: 0,
+      longestSessionWords: 0,
+      longestSessionDate: null,
+      sessionsPerActiveDay: 0,
+      wordsPerSessionWeekly: [],
+    };
+  }
+
+  const wordCounts = active.map(transcriptWords);
+  const totalWords = wordCounts.reduce((a, b) => a + b, 0);
+  const avgWordsPerSession = Math.round(totalWords / active.length);
+
+  const sorted = [...wordCounts].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const medianWordsPerSession =
+    sorted.length % 2 === 0
+      ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+      : sorted[mid];
+
+  let longestSessionWords = 0;
+  let longestSessionDate: string | null = null;
+  const activeDays = new Set<string>();
+  for (const t of active) {
+    const words = transcriptWords(t);
+    activeDays.add(dayjs(t.createdAt).format("YYYY-MM-DD"));
+    if (words > longestSessionWords) {
+      longestSessionWords = words;
+      longestSessionDate = dayjs(t.createdAt).format("YYYY-MM-DD");
+    }
+  }
+  const sessionsPerActiveDay =
+    activeDays.size > 0
+      ? Math.round((active.length / activeDays.size) * 10) / 10
+      : 0;
+
+  const WEEKS = 8;
+  const now = dayjs();
+  const wordsPerSessionWeekly: TrendPoint[] = [];
+  for (let i = WEEKS - 1; i >= 0; i--) {
+    const start = now.subtract(i, "week").startOf("week");
+    const end = start.add(1, "week");
+    let words = 0;
+    let count = 0;
+    for (const t of active) {
+      const d = dayjs(t.createdAt);
+      if (d.isBefore(start) || !d.isBefore(end)) continue;
+      words += transcriptWords(t);
+      count += 1;
+    }
+    wordsPerSessionWeekly.push({
+      label: start.format("MMM D"),
+      value: count > 0 ? Math.round(words / count) : 0,
+    });
+  }
+
+  return {
+    avgWordsPerSession,
+    medianWordsPerSession,
+    longestSessionWords,
+    longestSessionDate,
+    sessionsPerActiveDay,
+    wordsPerSessionWeekly,
+  };
+};
+
+export type WeekComparison = {
+  wordsThisWeek: number;
+  wordsLastWeek: number;
+  /** null when there's no prior week to compare against. */
+  wordsDeltaPct: number | null;
+  wpmThisWeek: number;
+  wpmLastWeek: number;
+  wpmDeltaPct: number | null;
+  activeDaysThisWeek: number;
+  activeDaysLastWeek: number;
+  activeDaysDelta: number;
+  personalBestWeekWords: number;
+  /** This week's words as a % of your all-time best week. */
+  paceVsBestWeekPct: number | null;
+};
+
+export const computeWeekComparison = (
+  transcriptions: Transcription[],
+): WeekComparison => {
+  const active = activeTranscriptions(transcriptions);
+  const thisWeekStart = dayjs().startOf("week");
+  const lastWeekStart = thisWeekStart.subtract(1, "week");
+
+  let wordsThisWeek = 0;
+  let msThisWeek = 0;
+  let wordsLastWeek = 0;
+  let msLastWeek = 0;
+  const daysThisWeek = new Set<string>();
+  const daysLastWeek = new Set<string>();
+  const weekTotals = new Map<string, number>();
+
+  for (const t of active) {
+    const d = dayjs(t.createdAt);
+    const words = transcriptWords(t);
+    const weekKey = d.startOf("week").format("YYYY-MM-DD");
+    weekTotals.set(weekKey, (weekTotals.get(weekKey) ?? 0) + words);
+
+    if (!d.isBefore(thisWeekStart)) {
+      wordsThisWeek += words;
+      msThisWeek += audioMs(t);
+      daysThisWeek.add(d.format("YYYY-MM-DD"));
+    } else if (!d.isBefore(lastWeekStart)) {
+      wordsLastWeek += words;
+      msLastWeek += audioMs(t);
+      daysLastWeek.add(d.format("YYYY-MM-DD"));
+    }
+  }
+
+  const minsThisWeek = msThisWeek / 60000;
+  const minsLastWeek = msLastWeek / 60000;
+  const wpmThisWeek =
+    minsThisWeek > 0 ? Math.round(wordsThisWeek / minsThisWeek) : 0;
+  const wpmLastWeek =
+    minsLastWeek > 0 ? Math.round(wordsLastWeek / minsLastWeek) : 0;
+
+  const wordsDeltaPct =
+    wordsLastWeek > 0
+      ? Math.round(((wordsThisWeek - wordsLastWeek) / wordsLastWeek) * 100)
+      : null;
+  const wpmDeltaPct =
+    wpmLastWeek > 0
+      ? Math.round(((wpmThisWeek - wpmLastWeek) / wpmLastWeek) * 100)
+      : null;
+
+  const personalBestWeekWords = Math.max(0, ...Array.from(weekTotals.values()));
+  const paceVsBestWeekPct =
+    personalBestWeekWords > 0
+      ? Math.round((wordsThisWeek / personalBestWeekWords) * 100)
+      : null;
+
+  return {
+    wordsThisWeek,
+    wordsLastWeek,
+    wordsDeltaPct,
+    wpmThisWeek,
+    wpmLastWeek,
+    wpmDeltaPct,
+    activeDaysThisWeek: daysThisWeek.size,
+    activeDaysLastWeek: daysLastWeek.size,
+    activeDaysDelta: daysThisWeek.size - daysLastWeek.size,
+    personalBestWeekWords,
+    paceVsBestWeekPct,
+  };
+};
+
+export type Efficiency = {
+  /** Corrections per 100 words, one point per week. */
+  correctionRateWeekly: TrendPoint[];
+  /** Negative = fewer corrections needed than last week (improving). */
+  correctionRateDeltaPct: number | null;
+  verbatimWords: number;
+  polishedWords: number;
+  /** 0-100 share of words dictated with post-processing off (verbatim). */
+  verbatimPct: number;
+  /** Words transcribed per second of processing time, one point per week. */
+  speedWeekly: TrendPoint[];
+};
+
+export const computeEfficiency = (
+  events: LocalDictationEvent[],
+  transcriptions: Transcription[],
+): Efficiency => {
+  const WEEKS = 8;
+  const now = dayjs();
+  const correctionRateWeekly: TrendPoint[] = [];
+  const speedWeekly: TrendPoint[] = [];
+
+  for (let i = WEEKS - 1; i >= 0; i--) {
+    const start = now.subtract(i, "week").startOf("week");
+    const end = start.add(1, "week");
+    let words = 0;
+    let corrections = 0;
+    let speedWords = 0;
+    let speedMs = 0;
+    for (const e of events) {
+      const d = dayjs(e.timestamp);
+      if (d.isBefore(start) || !d.isBefore(end)) continue;
+      words += e.wordCount;
+      corrections += e.correctionCount;
+      if (e.transcriptionDurationMs && e.transcriptionDurationMs > 0) {
+        speedWords += e.wordCount;
+        speedMs += e.transcriptionDurationMs;
+      }
+    }
+    const label = start.format("MMM D");
+    correctionRateWeekly.push({
+      label,
+      value: words > 0 ? Math.round((corrections / words) * 1000) / 10 : 0,
+    });
+    speedWeekly.push({
+      label,
+      value:
+        speedMs > 0 ? Math.round((speedWords / (speedMs / 1000)) * 10) / 10 : 0,
+    });
+  }
+
+  const lastRate =
+    correctionRateWeekly[correctionRateWeekly.length - 1]?.value ?? 0;
+  const prevRate =
+    correctionRateWeekly[correctionRateWeekly.length - 2]?.value ?? 0;
+  const correctionRateDeltaPct =
+    prevRate > 0 ? Math.round(((lastRate - prevRate) / prevRate) * 100) : null;
+
+  let verbatimWords = 0;
+  let polishedWords = 0;
+  for (const t of activeTranscriptions(transcriptions)) {
+    const words = transcriptWords(t);
+    if (t.postProcessMode && t.postProcessMode !== "none") {
+      polishedWords += words;
+    } else {
+      verbatimWords += words;
+    }
+  }
+  const splitWords = verbatimWords + polishedWords;
+  const verbatimPct =
+    splitWords > 0 ? Math.round((verbatimWords / splitWords) * 100) : 0;
+
+  return {
+    correctionRateWeekly,
+    correctionRateDeltaPct,
+    verbatimWords,
+    polishedWords,
+    verbatimPct,
+    speedWeekly,
+  };
+};
+
+export const AVG_EMAIL_WORDS = 150;
+export const AVG_TWEET_WORDS = 20;
+export const AVG_PAGE_WORDS = 250;
+
+export type WordComparisons = {
+  emails: number;
+  tweets: number;
+  pages: number;
+};
+
+export const computeWordComparisons = (
+  totalWords: number,
+): WordComparisons => ({
+  emails: Math.round(totalWords / AVG_EMAIL_WORDS),
+  tweets: Math.round(totalWords / AVG_TWEET_WORDS),
+  pages: Math.round(totalWords / AVG_PAGE_WORDS),
+});
+
+export type MilestoneOutlook = {
+  nextMilestone: number | null;
+  wordsRemaining: number | null;
+  daysToNextMilestone: number | null;
+  /** ISO date (YYYY-MM-DD) the next milestone is projected to land on. */
+  projectedDate: string | null;
+};
+
+export const computeMilestoneOutlook = (
+  events: LocalDictationEvent[],
+  transcriptions: Transcription[],
+): MilestoneOutlook => {
+  const usage = computeUsage(events, transcriptions);
+  const predictions = computePredictions(events, transcriptions);
+  const wordsRemaining =
+    predictions.nextMilestone !== null
+      ? Math.max(0, predictions.nextMilestone - usage.totalWords)
+      : null;
+  const projectedDate =
+    predictions.daysToNextMilestone !== null
+      ? dayjs().add(predictions.daysToNextMilestone, "day").format("YYYY-MM-DD")
+      : null;
+  return {
+    nextMilestone: predictions.nextMilestone,
+    wordsRemaining,
+    daysToNextMilestone: predictions.daysToNextMilestone,
+    projectedDate,
   };
 };

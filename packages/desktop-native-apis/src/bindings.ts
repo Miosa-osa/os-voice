@@ -332,6 +332,20 @@ async exportDiagnostics(diagnosticsInfo: string) : Promise<Result<boolean, strin
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Save an already-formatted dictionary export (JSON or Markdown glossary) to a
+ * user-chosen location via the native save dialog. The frontend builds the
+ * contents (reusing the tested JSON/Markdown builders) and hands them here so
+ * export works reliably outside the webview's flaky blob-download path.
+ */
+async exportDictionary(filename: string, contents: string) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_dictionary", { filename, contents }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async termCreate(term: Term) : Promise<Result<Term, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("term_create", { term }) };
@@ -1062,7 +1076,20 @@ export type StartRecordingResponse = { sampleRate: number }
 export type StartRemoteReceiverArgs = { port?: number | null }
 export type StopRecordingResponse = { samples: number[]; sampleRate: number }
 export type StorageUploadArgs = { path: string; data: number[] }
-export type Term = { id: string; createdAt: number; createdByUserId: string; sourceValue: string; destinationValue: string; isReplacement: boolean; isDeleted: boolean }
+export type Term = { id: string; createdAt: number; createdByUserId: string; sourceValue: string; destinationValue: string; isReplacement: boolean; isDeleted: boolean; 
+/**
+ * Plain-language definition of the term, grounded in how the user uses it.
+ * Optional so older rows and freshly-created corrections deserialize cleanly.
+ */
+definition?: string | null; 
+/**
+ * Category slug (acronym/technical/proper/phrase/word) for grouping.
+ */
+category?: string | null; 
+/**
+ * Epoch millis of when the definition was last generated.
+ */
+lastDefinedAt?: number | null }
 export type TextFieldInfo = { cursorPosition: number | null; selectionLength: number | null; textContent: string | null }
 export type Tone = { id: string; name: string; promptTemplate: string; createdAt: number; sortOrder: number }
 export type Transcription = { id: string; transcript: string; timestamp: number; audio?: TranscriptionAudioSnapshot | null; modelSize?: string | null; inferenceDevice?: string | null; rawTranscript?: string | null; sanitizedTranscript?: string | null; transcriptionPrompt?: string | null; postProcessPrompt?: string | null; transcriptionApiKeyId?: string | null; postProcessApiKeyId?: string | null; transcriptionMode?: string | null; postProcessMode?: string | null; postProcessDevice?: string | null; transcriptionDurationMs?: number | null; postprocessDurationMs?: number | null; warnings?: string[] | null; remoteStatus?: string | null; remoteDeviceId?: string | null }

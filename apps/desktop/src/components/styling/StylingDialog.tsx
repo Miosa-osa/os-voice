@@ -1,5 +1,6 @@
 import { Edit, PublicOutlined } from "@mui/icons-material";
 import {
+  Box,
   Button,
   Dialog,
   DialogActions,
@@ -71,9 +72,23 @@ export const StylingDialog = () => {
         </Stack>
       </DialogTitle>
       <DialogContent>
-        <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
-          {tone?.promptTemplate}
-        </Typography>
+        <Box
+          sx={{
+            bgcolor: "level1",
+            border: "1px solid",
+            borderColor: "level2",
+            borderRadius: 2,
+            p: 2,
+          }}
+        >
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{ whiteSpace: "pre-wrap" }}
+          >
+            {tone?.promptTemplate}
+          </Typography>
+        </Box>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Button variant="text" onClick={closeStylingDialog}>

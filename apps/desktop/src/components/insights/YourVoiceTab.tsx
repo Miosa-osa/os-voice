@@ -1,5 +1,8 @@
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Box,
   Button,
   Card,
@@ -9,9 +12,18 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
+import { alpha, useTheme } from "@mui/material/styles";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
+import BoltRoundedIcon from "@mui/icons-material/BoltRounded";
+import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import FitnessCenterRoundedIcon from "@mui/icons-material/FitnessCenterRounded";
+import FlagRoundedIcon from "@mui/icons-material/FlagRounded";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import TodayRoundedIcon from "@mui/icons-material/TodayRounded";
+import TrendingDownIcon from "@mui/icons-material/TrendingDown";
+import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import dayjs from "dayjs";
 import { FormattedMessage, useIntl } from "react-intl";
 import { Section } from "../common/Section";
@@ -19,6 +31,8 @@ import {
   PROFILE_UNLOCK_WORDS,
   SIGNATURE_UNLOCK_WORDS,
   WORD_ANALYSIS_UNLOCK_WORDS,
+  computeCoachingTrend,
+  computeRecentDictationsSummary,
   computeUsage,
   computeVoiceProfile,
   computeWordAnalysis,
@@ -26,9 +40,25 @@ import {
   milestoneFor,
   nextMilestoneWords,
 } from "../../lib/insights/compute";
-import { generateVoiceProfile } from "../../actions/insights.actions";
+import {
+  computeCoachingDrills,
+  computeCommunicationScore,
+  computeFocusThisWeek,
+  gradeColor,
+} from "../../lib/insights/coaching";
+import { DailyProfile } from "../../lib/insights/profile.types";
+import {
+  buildDailyReport,
+  buildProfileReport,
+  downloadReport,
+} from "../../lib/insights/report";
+import {
+  generateDailyProfile,
+  generateVoiceProfile,
+} from "../../actions/insights.actions";
 import { useAppStore } from "../../store";
 import { InsightsEmpty } from "./InsightsEmpty";
+import { MiniLine } from "./MiniLine";
 import { StatCard } from "./StatCard";
 import { useInsightsSources } from "./useInsightsData";
 import { WordCloud } from "./WordCloud";
@@ -41,6 +71,133 @@ const ChipRow = ({ items }: { items: string[] }) =>
       ))}
     </Stack>
   );
+
+const BulletList = ({
+  items,
+  color = "text.secondary",
+}: {
+  items: string[];
+  color?: string;
+}) => (
+  <Stack spacing={0.75}>
+    {items.map((item, i) => (
+      <Stack key={i} direction="row" spacing={1} alignItems="flex-start">
+        <Box
+          sx={{
+            mt: "7px",
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            bgcolor: color,
+            flexShrink: 0,
+          }}
+        />
+        <Typography variant="body2" color="textSecondary">
+          {item}
+        </Typography>
+      </Stack>
+    ))}
+  </Stack>
+);
+
+const CoachingGroup = ({
+  color,
+  label,
+  items,
+}: {
+  color: string;
+  label: React.ReactNode;
+  items: string[];
+}) => (
+  <Box>
+    <Typography
+      variant="overline"
+      sx={{ color, display: "block", fontWeight: 700 }}
+    >
+      {label}
+    </Typography>
+    <Box sx={{ mt: 0.5 }}>
+      <BulletList items={items} color={color} />
+    </Box>
+  </Box>
+);
+
+// A single labeled group of chips inside the consolidated "About you" card
+// (small sub-label + a ChipRow), so several previously separate full-width
+// Sections can live together as one scannable card.
+const AboutYouGroup = ({
+  label,
+  items,
+}: {
+  label: React.ReactNode;
+  items: string[];
+}) =>
+  items.length === 0 ? null : (
+    <Stack spacing={0.75}>
+      <Typography
+        variant="overline"
+        color="textSecondary"
+        sx={{ display: "block", fontWeight: 700 }}
+      >
+        {label}
+      </Typography>
+      <ChipRow items={items} />
+    </Stack>
+  );
+
+// The one consistent "highlight" card style used inside Coaching, replacing
+// the previous mix of an outlined box and a gradient box.
+const CoachingHighlight = ({ children }: { children: React.ReactNode }) => (
+  <Card sx={{ p: 2 }}>{children}</Card>
+);
+
+const CommunicationScoreGauge = ({
+  score,
+  grade,
+  color,
+}: {
+  score: number;
+  grade: string;
+  color: "success" | "info" | "warning" | "error";
+}) => (
+  <Box sx={{ position: "relative", display: "inline-flex" }}>
+    <CircularProgress
+      variant="determinate"
+      value={100}
+      size={88}
+      thickness={4}
+      sx={{ color: (theme) => alpha(theme.palette.text.primary, 0.08) }}
+    />
+    <CircularProgress
+      variant="determinate"
+      value={score}
+      size={88}
+      thickness={4}
+      color={color}
+      sx={{ position: "absolute", left: 0 }}
+    />
+    <Box
+      sx={{
+        top: 0,
+        left: 0,
+        bottom: 0,
+        right: 0,
+        position: "absolute",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Typography variant="h6" fontWeight={700} sx={{ lineHeight: 1 }}>
+        {grade}
+      </Typography>
+      <Typography variant="caption" color="textSecondary">
+        {score}/100
+      </Typography>
+    </Box>
+  </Box>
+);
 
 const ProfileRow = ({
   label,
@@ -87,17 +244,195 @@ const LockedSection = ({
   </Section>
 );
 
+// The full "Today" card: today's daily snapshot with regenerate/download
+// actions. Shown expanded and prominent above the timeline of past days.
+// Uses the plain flat card style — the gradient treatment is reserved for
+// the portrait only.
+const TodaySnapshotCard = ({
+  daily,
+  loading,
+  onRegenerate,
+  onDownload,
+}: {
+  daily: DailyProfile;
+  loading: boolean;
+  onRegenerate: () => void;
+  onDownload: () => void;
+}) => (
+  <Card sx={{ p: 3 }}>
+    <Stack spacing={1.5}>
+      <Stack direction="row" justifyContent="space-between" alignItems="center">
+        <Stack direction="row" spacing={1} alignItems="center">
+          <TodayRoundedIcon color="info" fontSize="small" />
+          <Typography variant="overline" color="info.main" fontWeight={700}>
+            <FormattedMessage
+              defaultMessage="Today · {date}"
+              values={{ date: dayjs(daily.date).format("MMM D") }}
+            />
+          </Typography>
+        </Stack>
+        <Stack direction="row" spacing={1}>
+          <Button
+            size="small"
+            startIcon={
+              loading ? <CircularProgress size={14} /> : <RefreshIcon />
+            }
+            disabled={loading}
+            onClick={onRegenerate}
+          >
+            {loading ? (
+              <FormattedMessage defaultMessage="Analyzing…" />
+            ) : (
+              <FormattedMessage defaultMessage="Regenerate" />
+            )}
+          </Button>
+          <Button
+            size="small"
+            startIcon={<DownloadRoundedIcon />}
+            onClick={onDownload}
+            aria-label="Download today's snapshot"
+          >
+            <FormattedMessage defaultMessage="Download" />
+          </Button>
+        </Stack>
+      </Stack>
+
+      {daily.summary && (
+        <Typography variant="body1">{daily.summary}</Typography>
+      )}
+
+      {(daily.mood || daily.energy) && (
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          {daily.mood && (
+            <Chip size="small" color="info" label={`Mood: ${daily.mood}`} />
+          )}
+          {daily.energy && (
+            <Chip
+              size="small"
+              variant="outlined"
+              color="info"
+              label={`Energy: ${daily.energy}`}
+            />
+          )}
+        </Stack>
+      )}
+
+      {daily.focus.length > 0 && (
+        <Box>
+          <Typography variant="caption" color="textSecondary">
+            <FormattedMessage defaultMessage="Focused on today" />
+          </Typography>
+          <Box pt={0.5}>
+            <ChipRow items={daily.focus} />
+          </Box>
+        </Box>
+      )}
+
+      {daily.notable && (
+        <Typography variant="body2" color="textSecondary" fontStyle="italic">
+          {`“${daily.notable}”`}
+        </Typography>
+      )}
+
+      {daily.comparedToUsual && (
+        <Typography variant="body2" color="textSecondary">
+          {daily.comparedToUsual}
+        </Typography>
+      )}
+    </Stack>
+  </Card>
+);
+
+// A single compact row in the daily-snapshot timeline: date, one-line
+// summary, mood — expandable for the rest of the fields, with its own
+// download action.
+const DailyTimelineItem = ({
+  daily,
+  onDownload,
+}: {
+  daily: DailyProfile;
+  onDownload: () => void;
+}) => (
+  <Accordion
+    disableGutters
+    elevation={0}
+    sx={{
+      "&:before": { display: "none" },
+      "&.Mui-expanded": { margin: 0 },
+      border: 1,
+      borderColor: "divider",
+      borderRadius: 2,
+      overflow: "hidden",
+      bgcolor: "transparent",
+      backgroundImage: "none",
+    }}
+  >
+    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+      <Stack sx={{ width: "100%", pr: 1 }} spacing={0.25}>
+        <Stack direction="row" justifyContent="space-between" spacing={2}>
+          <Typography fontWeight={600}>
+            {dayjs(daily.date).format("MMM D, YYYY")}
+          </Typography>
+          {daily.mood && (
+            <Typography variant="caption" color="textSecondary">
+              {daily.mood}
+            </Typography>
+          )}
+        </Stack>
+        {daily.summary && (
+          <Typography variant="body2" color="textSecondary" noWrap>
+            {daily.summary}
+          </Typography>
+        )}
+      </Stack>
+    </AccordionSummary>
+    <AccordionDetails sx={{ color: "text.primary", px: 2, pt: 1, pb: 2 }}>
+      <Stack spacing={1.5}>
+        {daily.focus.length > 0 && <ChipRow items={daily.focus} />}
+        {daily.notable && (
+          <Typography variant="body2" color="textSecondary" fontStyle="italic">
+            {`“${daily.notable}”`}
+          </Typography>
+        )}
+        {daily.howYouSpokeToday && (
+          <Typography variant="body2" color="textSecondary">
+            {daily.howYouSpokeToday}
+          </Typography>
+        )}
+        {daily.comparedToUsual && (
+          <Typography variant="body2" color="textSecondary">
+            {daily.comparedToUsual}
+          </Typography>
+        )}
+        <Box>
+          <Button
+            size="small"
+            startIcon={<DownloadRoundedIcon />}
+            onClick={onDownload}
+            aria-label={`Download snapshot for ${daily.date}`}
+          >
+            <FormattedMessage defaultMessage="Download" />
+          </Button>
+        </Box>
+      </Stack>
+    </AccordionDetails>
+  </Accordion>
+);
+
 export const YourVoiceTab = () => {
   const intl = useIntl();
+  const theme = useTheme();
   const { events, transcriptions, terms } = useInsightsSources();
   const aiProfile = useAppStore((s) => s.insights.aiProfile);
   const aiStatus = useAppStore((s) => s.insights.aiProfileStatus);
   const history = useAppStore((s) => s.local.voiceProfiles ?? []);
+  const dailyProfiles = useAppStore((s) => s.local.dailyProfiles ?? []);
 
-  const totalWords = useMemo(
-    () => computeUsage(events, transcriptions).totalWords,
+  const usage = useMemo(
+    () => computeUsage(events, transcriptions),
     [events, transcriptions],
   );
+  const totalWords = usage.totalWords;
   const milestone = milestoneFor(totalWords);
   const fallback = useMemo(
     () => computeVoiceProfile(events, transcriptions, terms, milestone),
@@ -121,12 +456,93 @@ export const YourVoiceTab = () => {
         .slice(0, 12),
     [terms],
   );
+  const coachingTrend = useMemo(() => computeCoachingTrend(history), [history]);
+  const recentSummary = useMemo(
+    () => computeRecentDictationsSummary(transcriptions, 20),
+    [transcriptions],
+  );
+  const communicationScore = useMemo(
+    () => computeCommunicationScore(words),
+    [words],
+  );
+  const focusThisWeek = useMemo(
+    () => computeFocusThisWeek(words, communicationScore),
+    [words, communicationScore],
+  );
+  const coachingDrills = useMemo(() => computeCoachingDrills(words), [words]);
+
+  // "Today" is anchored to the most recent dictation's calendar day (not the
+  // local clock's today), matching generateDailyProfile's default so the UI
+  // and the generator always agree on which day is "today".
+  const latestDictationDate = useMemo(() => {
+    const active = transcriptions
+      .filter((t) => !t.isDeleted && t.transcript.trim().length > 0)
+      .slice()
+      .sort(
+        (a, b) => dayjs(b.createdAt).valueOf() - dayjs(a.createdAt).valueOf(),
+      );
+    return active.length > 0
+      ? dayjs(active[0].createdAt).format("YYYY-MM-DD")
+      : null;
+  }, [transcriptions]);
+
+  const hasDictationsToday = latestDictationDate !== null;
+  const todayProfile = useMemo(
+    () => dailyProfiles.find((d) => d.date === latestDictationDate) ?? null,
+    [dailyProfiles, latestDictationDate],
+  );
+  const pastDailyProfiles = useMemo(
+    () => dailyProfiles.filter((d) => d.date !== latestDictationDate),
+    [dailyProfiles, latestDictationDate],
+  );
+
+  const [dailyLoading, setDailyLoading] = useState(false);
+  const dailyAutoGenRef = useRef(false);
 
   useEffect(() => {
     if (totalWords >= PROFILE_UNLOCK_WORDS) {
       void generateVoiceProfile();
     }
   }, [totalWords, milestone]);
+
+  useEffect(() => {
+    if (dailyAutoGenRef.current) return;
+    if (!hasDictationsToday) return;
+    if (todayProfile?.generated) return;
+    dailyAutoGenRef.current = true;
+    setDailyLoading(true);
+    void generateDailyProfile().finally(() => setDailyLoading(false));
+  }, [hasDictationsToday, todayProfile]);
+
+  const handleRegenerateDaily = useCallback(() => {
+    if (!latestDictationDate) return;
+    setDailyLoading(true);
+    void generateDailyProfile({
+      date: latestDictationDate,
+      force: true,
+    }).finally(() => setDailyLoading(false));
+  }, [latestDictationDate]);
+
+  const handleDownloadDaily = useCallback(
+    (daily: DailyProfile) => {
+      const contents = buildDailyReport(daily, {
+        profileName: aiProfile?.name ?? fallback.name,
+      });
+      void downloadReport(`os-voice-daily-${daily.date}.md`, contents);
+    },
+    [aiProfile, fallback.name],
+  );
+
+  const handleDownloadCoreReport = useCallback(() => {
+    if (!aiProfile) return;
+    const contents = buildProfileReport({
+      profile: aiProfile,
+      usage,
+      daily: todayProfile,
+    });
+    const filename = `os-voice-profile-${dayjs().format("YYYY-MM-DD")}.md`;
+    void downloadReport(filename, contents);
+  }, [aiProfile, usage, todayProfile]);
 
   if (totalWords === 0) {
     return <InsightsEmpty />;
@@ -138,7 +554,7 @@ export const YourVoiceTab = () => {
       Math.round((totalWords / PROFILE_UNLOCK_WORDS) * 100),
     );
     return (
-      <Card variant="outlined" sx={{ p: 4 }}>
+      <Card sx={{ p: 4 }}>
         <Stack spacing={2} alignItems="center" textAlign="center">
           <AutoAwesomeIcon color="primary" />
           <Typography variant="h6" fontWeight={700}>
@@ -170,9 +586,82 @@ export const YourVoiceTab = () => {
   const name = aiProfile?.name ?? fallback.name;
   const identity = aiProfile?.identity ?? fallback.description;
 
+  // The many short chip-list facets of the profile, collapsed into one
+  // "About you" card with labeled sub-groups instead of 6-7 separate
+  // full-width Sections.
+  const aboutYouGroups = aiProfile
+    ? [
+        {
+          key: "personality",
+          label: <FormattedMessage defaultMessage="Personality" />,
+          items: aiProfile.personality ?? [],
+        },
+        {
+          key: "motivations",
+          label: <FormattedMessage defaultMessage="What drives you" />,
+          items: aiProfile.motivations ?? [],
+        },
+        {
+          key: "mindset",
+          label: <FormattedMessage defaultMessage="How your mind moves" />,
+          items: aiProfile.mindsetPatterns ?? [],
+        },
+        {
+          key: "care",
+          label: <FormattedMessage defaultMessage="What you care about" />,
+          items: aiProfile.whatYouCareAbout ?? [],
+        },
+        {
+          key: "expertise",
+          label: <FormattedMessage defaultMessage="Your expertise" />,
+          items: aiProfile.expertise ?? [],
+        },
+        {
+          key: "quirks",
+          label: <FormattedMessage defaultMessage="Speech quirks" />,
+          items: aiProfile.quirks ?? [],
+        },
+        {
+          key: "language",
+          label: <FormattedMessage defaultMessage="Your ubiquitous language" />,
+          items: aiProfile.ubiquitousLanguage ?? [],
+        },
+      ].filter((group) => group.items.length > 0)
+    : [];
+
+  const hasCoachingContent = Boolean(
+    aiProfile?.coaching &&
+    (aiProfile.coaching.strengths.length > 0 ||
+      aiProfile.coaching.growthAreas.length > 0 ||
+      aiProfile.coaching.suggestions.length > 0),
+  );
+  const hasTrend = Boolean(coachingTrend && coachingTrend.summary.length > 0);
+  const hasCoachingSection =
+    hasCoachingContent || hasTrend || Boolean(recentSummary);
+
   return (
     <Stack spacing={3}>
-      <Card variant="outlined" sx={{ p: 3 }}>
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        justifyContent="space-between"
+        alignItems={{ xs: "flex-start", sm: "center" }}
+        spacing={1}
+      >
+        <Typography variant="overline" color="textSecondary" fontWeight={700}>
+          <FormattedMessage defaultMessage="Your core profile" />
+        </Typography>
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<DownloadRoundedIcon />}
+          disabled={!aiProfile}
+          onClick={handleDownloadCoreReport}
+        >
+          <FormattedMessage defaultMessage="Download report" />
+        </Button>
+      </Stack>
+
+      <Card sx={{ p: 3 }}>
         <Stack spacing={1.5}>
           <Stack
             direction="row"
@@ -271,10 +760,10 @@ export const YourVoiceTab = () => {
 
           <Typography variant="caption" color="textSecondary">
             {wordsToNext === null ? (
-              <FormattedMessage defaultMessage="You've reached the top milestone — your profile keeps refining." />
+              <FormattedMessage defaultMessage="You've reached the top milestone — your profile keeps living, refreshing itself as you keep dictating." />
             ) : (
               <FormattedMessage
-                defaultMessage="Evolves at your next milestone · {n} words to go"
+                defaultMessage="Evolves at your next milestone ({n} words to go) — and keeps quietly refreshing as you dictate more."
                 values={{ n: wordsToNext.toLocaleString() }}
               />
             )}
@@ -282,14 +771,129 @@ export const YourVoiceTab = () => {
         </Stack>
       </Card>
 
-      {aiProfile && aiProfile.quirks.length > 0 && (
-        <Section title={<FormattedMessage defaultMessage="Speech quirks" />}>
-          <ChipRow items={aiProfile.quirks} />
+      {/* The single hero gradient treatment in this tab — everything else
+          uses the plain flat card / Section style. */}
+      {aiProfile?.portrait && (
+        <Card
+          sx={{
+            p: 3,
+            borderRadius: 3,
+            borderColor: alpha(theme.palette.primary.main, 0.3),
+            background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.1)}, ${alpha(theme.palette.primary.main, 0.02)})`,
+          }}
+        >
+          <Stack spacing={1}>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <AutoAwesomeIcon color="primary" fontSize="small" />
+              <Typography variant="overline" color="primary" fontWeight={700}>
+                <FormattedMessage defaultMessage="Your portrait" />
+              </Typography>
+            </Stack>
+            <Typography variant="h6" fontWeight={500} sx={{ lineHeight: 1.5 }}>
+              {aiProfile.portrait}
+            </Typography>
+          </Stack>
+        </Card>
+      )}
+
+      {(hasDictationsToday || pastDailyProfiles.length > 0) && (
+        <Stack spacing={1.5}>
+          <Box>
+            <Typography variant="h6" fontWeight={700}>
+              <FormattedMessage defaultMessage="Daily snapshots" />
+            </Typography>
+            <Typography variant="body2" color="textSecondary">
+              <FormattedMessage defaultMessage="How you are today — a timeline separate from your stable core profile, so you can track how you change day to day." />
+            </Typography>
+          </Box>
+
+          {hasDictationsToday &&
+            (todayProfile ? (
+              <TodaySnapshotCard
+                daily={todayProfile}
+                loading={dailyLoading}
+                onRegenerate={handleRegenerateDaily}
+                onDownload={() => handleDownloadDaily(todayProfile)}
+              />
+            ) : (
+              <Card sx={{ p: 3 }}>
+                <Stack
+                  direction="row"
+                  spacing={1.5}
+                  alignItems="center"
+                  justifyContent="center"
+                >
+                  <CircularProgress size={16} />
+                  <Typography variant="body2" color="textSecondary">
+                    <FormattedMessage defaultMessage="Building today's snapshot…" />
+                  </Typography>
+                </Stack>
+              </Card>
+            ))}
+
+          {pastDailyProfiles.length > 0 && (
+            <Stack spacing={1}>
+              <Typography variant="caption" color="textSecondary">
+                <FormattedMessage defaultMessage="Previous days" />
+              </Typography>
+              <Stack spacing={1}>
+                {pastDailyProfiles.map((daily) => (
+                  <DailyTimelineItem
+                    key={daily.date}
+                    daily={daily}
+                    onDownload={() => handleDownloadDaily(daily)}
+                  />
+                ))}
+              </Stack>
+            </Stack>
+          )}
+        </Stack>
+      )}
+
+      {aboutYouGroups.length > 0 && (
+        <Section title={<FormattedMessage defaultMessage="About you" />}>
+          <Stack spacing={2}>
+            {aboutYouGroups.map((group) => (
+              <AboutYouGroup
+                key={group.key}
+                label={group.label}
+                items={group.items}
+              />
+            ))}
+          </Stack>
+        </Section>
+      )}
+
+      {aiProfile?.howYouThink && (
+        <Section title={<FormattedMessage defaultMessage="How you think" />}>
+          <Typography variant="body2" color="textSecondary">
+            {aiProfile.howYouThink}
+          </Typography>
+        </Section>
+      )}
+
+      {aiProfile?.communicationSuperpower && (
+        <Section
+          title={
+            <FormattedMessage defaultMessage="Your communication superpower" />
+          }
+        >
+          <Stack direction="row" spacing={1.5} alignItems="flex-start">
+            <BoltRoundedIcon color="primary" sx={{ mt: "2px" }} />
+            <Typography variant="body1" fontWeight={600}>
+              {aiProfile.communicationSuperpower}
+            </Typography>
+          </Stack>
         </Section>
       )}
 
       {totalWords >= WORD_ANALYSIS_UNLOCK_WORDS ? (
         <Section title={<FormattedMessage defaultMessage="How you speak" />}>
+          {aiProfile?.howYouSpeak && (
+            <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+              {aiProfile.howYouSpeak}
+            </Typography>
+          )}
           <Box
             sx={{
               display: "grid",
@@ -337,127 +941,403 @@ export const YourVoiceTab = () => {
         />
       )}
 
-      {totalWords >= SIGNATURE_UNLOCK_WORDS ? (
-        <Section title={<FormattedMessage defaultMessage="Signature" />}>
-          <Stack spacing={2}>
-            <ProfileRow
-              label={<FormattedMessage defaultMessage="Catchphrase" />}
-              value={fallback.catchphrase}
-            />
-            <ProfileRow
-              label={<FormattedMessage defaultMessage="Most used word" />}
-              value={fallback.mostUsedWord}
-            />
-            <ProfileRow
-              label={<FormattedMessage defaultMessage="Most corrected word" />}
-              value={fallback.mostCorrectedWord}
-            />
-          </Stack>
-        </Section>
-      ) : (
-        <LockedSection
-          title={<FormattedMessage defaultMessage="Signature" />}
-          unlockAt={SIGNATURE_UNLOCK_WORDS}
-          totalWords={totalWords}
-        />
-      )}
-
-      <Section title={<FormattedMessage defaultMessage="Peak time & place" />}>
-        <Stack spacing={2}>
-          <ProfileRow
-            label={<FormattedMessage defaultMessage="Peak time" />}
-            value={fallback.peakHourLabel}
-          />
-          <ProfileRow
-            label={<FormattedMessage defaultMessage="Busiest day" />}
-            value={fallback.peakWeekday}
-          />
-          <ProfileRow
-            label={<FormattedMessage defaultMessage="Top app" />}
-            value={fallback.topApp}
-          />
-        </Stack>
-      </Section>
-
-      {cloud.length > 0 && (
-        <Section title={<FormattedMessage defaultMessage="Your word cloud" />}>
-          <WordCloud words={cloud} />
-        </Section>
-      )}
-
-      {recentTerms.length > 0 && (
+      {aiProfile?.howOthersExperienceYou && (
         <Section
-          title={<FormattedMessage defaultMessage="Recently learned" />}
+          title={<FormattedMessage defaultMessage="How you come across" />}
+        >
+          <Typography variant="body2" color="textSecondary">
+            {aiProfile.howOthersExperienceYou}
+          </Typography>
+        </Section>
+      )}
+
+      {aiProfile && (aiProfile.blindSpots?.length ?? 0) > 0 && (
+        <Section
+          title={<FormattedMessage defaultMessage="Blind spots" />}
           description={
-            <FormattedMessage defaultMessage="Words OS Voice has picked up from your corrections and dictionary." />
+            <FormattedMessage defaultMessage="Patterns worth noticing — not judgments, just honest observations." />
           }
         >
-          <Stack spacing={1}>
-            {recentTerms.map((t) => (
+          <BulletList
+            items={aiProfile.blindSpots ?? []}
+            color="text.secondary"
+          />
+        </Section>
+      )}
+
+      {hasCoachingSection && (
+        <Section
+          title={<FormattedMessage defaultMessage="Coaching" />}
+          description={
+            <FormattedMessage defaultMessage="An honest, grounded read on how you speak — what's working and what to try next." />
+          }
+        >
+          <Stack spacing={2}>
+            <CoachingHighlight>
               <Stack
-                key={t.id}
-                direction="row"
-                justifyContent="space-between"
-                alignItems="baseline"
+                direction={{ xs: "column", sm: "row" }}
+                spacing={2.5}
+                alignItems={{ xs: "flex-start", sm: "center" }}
               >
-                <Typography fontWeight={600}>{t.destinationValue}</Typography>
-                <Typography variant="caption" color="textSecondary">
-                  {dayjs(t.createdAt).format("MMM D")}
-                </Typography>
+                <CommunicationScoreGauge
+                  score={communicationScore.score}
+                  grade={communicationScore.grade}
+                  color={gradeColor(communicationScore.grade)}
+                />
+                <Stack spacing={0.75} sx={{ flex: 1 }}>
+                  <Typography variant="subtitle1" fontWeight={700}>
+                    <FormattedMessage defaultMessage="Communication score" />
+                  </Typography>
+                  {communicationScore.lift && (
+                    <Stack direction="row" spacing={1} alignItems="flex-start">
+                      <TrendingUpIcon
+                        fontSize="small"
+                        color="success"
+                        sx={{ mt: "1px" }}
+                      />
+                      <Typography variant="body2" color="textSecondary">
+                        {communicationScore.lift}
+                      </Typography>
+                    </Stack>
+                  )}
+                  {communicationScore.drag && (
+                    <Stack direction="row" spacing={1} alignItems="flex-start">
+                      <TrendingDownIcon
+                        fontSize="small"
+                        color="warning"
+                        sx={{ mt: "1px" }}
+                      />
+                      <Typography variant="body2" color="textSecondary">
+                        {communicationScore.drag}
+                      </Typography>
+                    </Stack>
+                  )}
+                </Stack>
               </Stack>
-            ))}
+            </CoachingHighlight>
+
+            {focusThisWeek && (
+              <CoachingHighlight>
+                <Stack direction="row" spacing={1.5} alignItems="flex-start">
+                  <FlagRoundedIcon color="primary" sx={{ mt: "2px" }} />
+                  <Stack spacing={0.5}>
+                    <Typography
+                      variant="overline"
+                      color="primary"
+                      fontWeight={700}
+                      sx={{ lineHeight: 1.2 }}
+                    >
+                      <FormattedMessage defaultMessage="Focus this week" />
+                    </Typography>
+                    <Typography variant="body1" fontWeight={600}>
+                      {focusThisWeek.title}
+                    </Typography>
+                    <Typography variant="body2" color="textSecondary">
+                      {focusThisWeek.detail}
+                    </Typography>
+                  </Stack>
+                </Stack>
+              </CoachingHighlight>
+            )}
+
+            {hasTrend && coachingTrend && (
+              <Box>
+                <Typography
+                  variant="overline"
+                  sx={{
+                    color: "info.main",
+                    display: "block",
+                    fontWeight: 700,
+                  }}
+                >
+                  <FormattedMessage defaultMessage="Did I improve?" />
+                </Typography>
+                <Stack spacing={0.75} sx={{ mt: 0.5 }}>
+                  {coachingTrend.summary.map((item, i) => (
+                    <Stack
+                      key={i}
+                      direction="row"
+                      spacing={1}
+                      alignItems="flex-start"
+                    >
+                      {item.direction === "positive" ? (
+                        <TrendingUpIcon
+                          fontSize="small"
+                          color="success"
+                          sx={{ mt: "1px" }}
+                        />
+                      ) : (
+                        <TrendingDownIcon
+                          fontSize="small"
+                          color="warning"
+                          sx={{ mt: "1px" }}
+                        />
+                      )}
+                      <Typography variant="body2" color="textSecondary">
+                        {item.text}
+                      </Typography>
+                    </Stack>
+                  ))}
+                </Stack>
+                {coachingTrend.fillerPoints.length >= 2 && (
+                  <Box sx={{ mt: 1.5 }}>
+                    <Typography variant="caption" color="textSecondary">
+                      <FormattedMessage defaultMessage="Filler rate over time" />
+                    </Typography>
+                    <MiniLine data={coachingTrend.fillerPoints} height={48} />
+                  </Box>
+                )}
+              </Box>
+            )}
+
+            {aiProfile?.coaching?.strengths &&
+              aiProfile.coaching.strengths.length > 0 && (
+                <CoachingGroup
+                  color="success.main"
+                  label={<FormattedMessage defaultMessage="What you do well" />}
+                  items={aiProfile.coaching.strengths}
+                />
+              )}
+            {aiProfile?.coaching?.growthAreas &&
+              aiProfile.coaching.growthAreas.length > 0 && (
+                <CoachingGroup
+                  color="warning.main"
+                  label={<FormattedMessage defaultMessage="Where to grow" />}
+                  items={aiProfile.coaching.growthAreas}
+                />
+              )}
+            {aiProfile?.coaching?.suggestions &&
+              aiProfile.coaching.suggestions.length > 0 && (
+                <CoachingGroup
+                  color="primary.main"
+                  label={<FormattedMessage defaultMessage="Try this next" />}
+                  items={aiProfile.coaching.suggestions}
+                />
+              )}
+
+            {coachingDrills.length > 0 && (
+              <Box>
+                <Typography
+                  variant="overline"
+                  sx={{
+                    color: "secondary.main",
+                    display: "block",
+                    fontWeight: 700,
+                  }}
+                >
+                  <FormattedMessage defaultMessage="Drills to practice" />
+                </Typography>
+                <Stack spacing={1.5} sx={{ mt: 0.5 }}>
+                  {coachingDrills.map((drill) => (
+                    <Box key={drill.area}>
+                      <Stack
+                        direction="row"
+                        spacing={1}
+                        alignItems="center"
+                        sx={{ mb: 0.5 }}
+                      >
+                        <FitnessCenterRoundedIcon
+                          fontSize="small"
+                          color="secondary"
+                        />
+                        <Typography variant="body2" fontWeight={700}>
+                          {drill.area}
+                        </Typography>
+                      </Stack>
+                      <BulletList items={drill.tips} color="secondary.main" />
+                    </Box>
+                  ))}
+                </Stack>
+              </Box>
+            )}
+
+            {recentSummary && (
+              <Box>
+                <Typography
+                  variant="overline"
+                  color="textSecondary"
+                  sx={{ display: "block", fontWeight: 700 }}
+                >
+                  <FormattedMessage defaultMessage="Across your recent dictations" />
+                </Typography>
+                <Typography
+                  variant="body2"
+                  color="textSecondary"
+                  sx={{ mt: 0.5 }}
+                >
+                  <FormattedMessage
+                    defaultMessage="Looking at your last {count} dictations: about {fillerRate} filler words per 100, {avgLen}-word sentences on average, and {q}% phrased as questions."
+                    values={{
+                      count: recentSummary.count,
+                      fillerRate: recentSummary.words.fillerRate,
+                      avgLen: recentSummary.words.avgSentenceLength,
+                      q: recentSummary.words.questionRatio,
+                    }}
+                  />
+                </Typography>
+              </Box>
+            )}
           </Stack>
         </Section>
       )}
 
-      {history.length > 0 && (
-        <Section
-          title={<FormattedMessage defaultMessage="Milestone history" />}
-        >
-          <Stack spacing={1.5}>
-            {history
-              .slice()
-              .reverse()
-              .map((h) => (
-                <Stack
-                  key={h.milestone}
-                  direction="row"
-                  justifyContent="space-between"
-                  alignItems="center"
-                  sx={{
-                    borderLeft: 2,
-                    borderColor: "primary.main",
-                    pl: 1.5,
-                    py: 0.5,
-                  }}
-                >
-                  <Box>
-                    <Typography fontWeight={600}>{h.profile.name}</Typography>
-                    <Typography variant="caption" color="textSecondary">
-                      <FormattedMessage
-                        defaultMessage="{n} words · {date}"
-                        values={{
-                          n: h.totalWords.toLocaleString(),
-                          date: dayjs(h.createdAt).format("MMM D"),
-                        }}
-                      />
-                    </Typography>
-                  </Box>
-                  {h.catchphrase && (
-                    <Typography
-                      variant="caption"
-                      color="textSecondary"
-                      sx={{ maxWidth: 160, textAlign: "right" }}
-                      noWrap
-                    >
-                      {`“${h.catchphrase}”`}
-                    </Typography>
-                  )}
+      {/* Long-form / less-revisited facts, tucked behind one toggle so the
+          rest of the tab stays scannable. */}
+      <Accordion
+        disableGutters
+        elevation={0}
+        sx={{
+          "&:before": { display: "none" },
+          "&.Mui-expanded": { margin: 0 },
+          border: 1,
+          borderColor: "divider",
+          borderRadius: 2,
+          overflow: "hidden",
+          bgcolor: "transparent",
+          backgroundImage: "none",
+        }}
+      >
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography variant="h6" fontWeight="bold">
+            <FormattedMessage defaultMessage="More about you" />
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails sx={{ color: "text.primary", px: 2, pt: 1, pb: 2.5 }}>
+          <Stack spacing={3}>
+            {totalWords >= SIGNATURE_UNLOCK_WORDS ? (
+              <Section title={<FormattedMessage defaultMessage="Signature" />}>
+                <Stack spacing={2}>
+                  <ProfileRow
+                    label={<FormattedMessage defaultMessage="Catchphrase" />}
+                    value={fallback.catchphrase}
+                  />
+                  <ProfileRow
+                    label={<FormattedMessage defaultMessage="Most used word" />}
+                    value={fallback.mostUsedWord}
+                  />
+                  <ProfileRow
+                    label={
+                      <FormattedMessage defaultMessage="Most corrected word" />
+                    }
+                    value={fallback.mostCorrectedWord}
+                  />
                 </Stack>
-              ))}
+              </Section>
+            ) : (
+              <LockedSection
+                title={<FormattedMessage defaultMessage="Signature" />}
+                unlockAt={SIGNATURE_UNLOCK_WORDS}
+                totalWords={totalWords}
+              />
+            )}
+
+            <Section
+              title={<FormattedMessage defaultMessage="Peak time & place" />}
+            >
+              <Stack spacing={2}>
+                <ProfileRow
+                  label={<FormattedMessage defaultMessage="Peak time" />}
+                  value={fallback.peakHourLabel}
+                />
+                <ProfileRow
+                  label={<FormattedMessage defaultMessage="Busiest day" />}
+                  value={fallback.peakWeekday}
+                />
+                <ProfileRow
+                  label={<FormattedMessage defaultMessage="Top app" />}
+                  value={fallback.topApp}
+                />
+              </Stack>
+            </Section>
+
+            {cloud.length > 0 && (
+              <Section
+                title={<FormattedMessage defaultMessage="Your word cloud" />}
+              >
+                <WordCloud words={cloud} />
+              </Section>
+            )}
+
+            {recentTerms.length > 0 && (
+              <Section
+                title={<FormattedMessage defaultMessage="Recently learned" />}
+                description={
+                  <FormattedMessage defaultMessage="Words OS Voice has picked up from your corrections and dictionary." />
+                }
+              >
+                <Stack spacing={1}>
+                  {recentTerms.map((t) => (
+                    <Stack
+                      key={t.id}
+                      direction="row"
+                      justifyContent="space-between"
+                      alignItems="baseline"
+                    >
+                      <Typography fontWeight={600}>
+                        {t.destinationValue}
+                      </Typography>
+                      <Typography variant="caption" color="textSecondary">
+                        {dayjs(t.createdAt).format("MMM D")}
+                      </Typography>
+                    </Stack>
+                  ))}
+                </Stack>
+              </Section>
+            )}
+
+            {history.length > 0 && (
+              <Section
+                title={<FormattedMessage defaultMessage="Milestone history" />}
+              >
+                <Stack spacing={1.5}>
+                  {history
+                    .slice()
+                    .reverse()
+                    .map((h) => (
+                      <Stack
+                        key={h.milestone}
+                        direction="row"
+                        justifyContent="space-between"
+                        alignItems="center"
+                        sx={{
+                          borderLeft: 2,
+                          borderColor: "primary.main",
+                          pl: 1.5,
+                          py: 0.5,
+                        }}
+                      >
+                        <Box>
+                          <Typography fontWeight={600}>
+                            {h.profile.name}
+                          </Typography>
+                          <Typography variant="caption" color="textSecondary">
+                            <FormattedMessage
+                              defaultMessage="{n} words · {date}"
+                              values={{
+                                n: h.totalWords.toLocaleString(),
+                                date: dayjs(h.createdAt).format("MMM D"),
+                              }}
+                            />
+                          </Typography>
+                        </Box>
+                        {h.catchphrase && (
+                          <Typography
+                            variant="caption"
+                            color="textSecondary"
+                            sx={{ maxWidth: 160, textAlign: "right" }}
+                            noWrap
+                          >
+                            {`“${h.catchphrase}”`}
+                          </Typography>
+                        )}
+                      </Stack>
+                    ))}
+                </Stack>
+              </Section>
+            )}
           </Stack>
-        </Section>
-      )}
+        </AccordionDetails>
+      </Accordion>
     </Stack>
   );
 };

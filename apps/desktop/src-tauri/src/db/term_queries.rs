@@ -4,8 +4,8 @@ use crate::domain::Term;
 
 pub async fn insert_term(pool: SqlitePool, term: &Term) -> Result<Term, sqlx::Error> {
     sqlx::query(
-        "INSERT INTO terms (id, created_at, created_by_user_id, source_value, destination_value, is_replacement, is_deleted)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO terms (id, created_at, created_by_user_id, source_value, destination_value, is_replacement, is_deleted, definition, category, last_defined_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
     )
     .bind(&term.id)
     .bind(term.created_at)
@@ -14,6 +14,9 @@ pub async fn insert_term(pool: SqlitePool, term: &Term) -> Result<Term, sqlx::Er
     .bind(&term.destination_value)
     .bind(term.is_replacement as i64)
     .bind(term.is_deleted as i64)
+    .bind(&term.definition)
+    .bind(&term.category)
+    .bind(term.last_defined_at)
     .execute(&pool)
     .await?;
 
@@ -22,7 +25,7 @@ pub async fn insert_term(pool: SqlitePool, term: &Term) -> Result<Term, sqlx::Er
 
 pub async fn fetch_terms(pool: SqlitePool) -> Result<Vec<Term>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT id, created_at, created_by_user_id, source_value, destination_value, is_replacement, is_deleted
+        "SELECT id, created_at, created_by_user_id, source_value, destination_value, is_replacement, is_deleted, definition, category, last_defined_at
          FROM terms
          WHERE is_deleted = 0
          ORDER BY created_at DESC",
@@ -40,6 +43,9 @@ pub async fn fetch_terms(pool: SqlitePool) -> Result<Vec<Term>, sqlx::Error> {
             destination_value: row.get::<String, _>("destination_value"),
             is_replacement: row.get::<i64, _>("is_replacement") != 0,
             is_deleted: row.get::<i64, _>("is_deleted") != 0,
+            definition: row.get::<Option<String>, _>("definition"),
+            category: row.get::<Option<String>, _>("category"),
+            last_defined_at: row.get::<Option<i64>, _>("last_defined_at"),
         })
         .collect();
 
@@ -52,7 +58,10 @@ pub async fn update_term(pool: SqlitePool, term: &Term) -> Result<Term, sqlx::Er
          SET source_value = ?2,
              destination_value = ?3,
              is_replacement = ?4,
-             is_deleted = ?5
+             is_deleted = ?5,
+             definition = ?6,
+             category = ?7,
+             last_defined_at = ?8
          WHERE id = ?1",
     )
     .bind(&term.id)
@@ -60,6 +69,9 @@ pub async fn update_term(pool: SqlitePool, term: &Term) -> Result<Term, sqlx::Er
     .bind(&term.destination_value)
     .bind(term.is_replacement as i64)
     .bind(term.is_deleted as i64)
+    .bind(&term.definition)
+    .bind(&term.category)
+    .bind(term.last_defined_at)
     .execute(&pool)
     .await?;
 

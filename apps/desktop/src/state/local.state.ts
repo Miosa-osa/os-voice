@@ -1,4 +1,8 @@
-import { StoredVoiceProfile } from "../lib/insights/profile.types";
+import {
+  DailyProfile,
+  StoredVoiceProfile,
+} from "../lib/insights/profile.types";
+import { LearnedWord } from "./vocab.state";
 
 export type LocalState = {
   assistantModeEnabled: boolean;
@@ -13,7 +17,14 @@ export type LocalState = {
   disableAutoStyleLoading?: boolean;
   optInToBetaUpdates: boolean;
   voiceProfiles?: StoredVoiceProfile[];
+  // Timeline of "how I am today" snapshots, one per calendar day, layered on
+  // top of the stable voiceProfiles (core identity) history above.
+  dailyProfiles?: DailyProfile[];
   liteMode?: boolean;
+  // Persistent intelligent dictionary: timestamped, categorized, defined words
+  // OS Voice has learned, plus the words the user has explicitly dismissed.
+  learnedVocab?: LearnedWord[];
+  dismissedVocab?: string[];
 };
 
 export const INITIAL_LOCAL_STATE: LocalState = {

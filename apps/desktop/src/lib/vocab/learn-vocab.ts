@@ -337,6 +337,33 @@ const COMMON_WORDS = new Set<string>([
   "everybody",
 ]);
 
+// Spelled-out numbers aren't in COMMON_WORDS (that list is general filler),
+// but they're exactly the kind of token that turns a real phrase into
+// transcription noise like "launch ten to fifteen ages" — reject them from
+// candidacy the same way we reject digits.
+const NUMBER_WORDS = new Set<string>([
+  "eleven",
+  "twelve",
+  "thirteen",
+  "fourteen",
+  "fifteen",
+  "sixteen",
+  "seventeen",
+  "eighteen",
+  "nineteen",
+  "twenty",
+  "thirty",
+  "forty",
+  "fifty",
+  "sixty",
+  "seventy",
+  "eighty",
+  "ninety",
+  "dozen",
+  "billion",
+  "trillion",
+]);
+
 const TOKEN_RE = /[A-Za-z][A-Za-z0-9'’-]*[A-Za-z0-9]|[A-Za-z]/g;
 
 const isCapitalizedWord = (token: string): boolean =>
@@ -351,15 +378,58 @@ const strongDistinctiveness = (token: string): number => {
 
 const sentencesOf = (text: string): string[] => text.split(/[.!?\n]+/);
 
+// Precision gate for multi-word candidates: a bigram of two adjacent
+// capitalized tokens can still read as noise stitched from ordinary speech
+// (e.g. a garbled "Launch Ages" spanning a dropped number). Require the
+// phrase to actually look like a coined term/name rather than a run of
+// words — no digits, no spelled-out numbers, capped length, and not
+// dominated by filler words.
+const isLikelyGenuinePhrase = (words: string[]): boolean => {
+  if (words.length < 2) return true;
+  if (words.length > 3) return false;
+  let fillerCount = 0;
+  for (const word of words) {
+    const lower = word.toLowerCase();
+    if (/\d/.test(word)) return false;
+    if (NUMBER_WORDS.has(lower)) return false;
+    if (COMMON_WORDS.has(lower)) fillerCount += 1;
+  }
+  // Mostly stopwords -> not a coined term, just a run of ordinary speech.
+  return fillerCount / words.length < 0.5;
+};
+
 export type LearnVocabOptions = { excluded?: Set<string>; max?: number };
 
-type Entry = { display: string; count: number; weight: number };
+// A learned word with the evidence behind it: how many times it was heard and a
+// real sentence it showed up in (used as an example in the dictionary UI).
+export type LearnedVocabItem = {
+  word: string;
+  count: number;
+  example: string;
+};
+
+type Entry = {
+  display: string;
+  count: number;
+  weight: number;
+  example: string;
+};
+
+const cleanExample = (sentence: string): string => {
+  const trimmed = sentence.trim().replace(/\s+/g, " ");
+  return trimmed.length > 160 ? `${trimmed.slice(0, 157)}…` : trimmed;
+};
 
 export const learnVocabulary = (
   transcripts: string[],
   opts: LearnVocabOptions = {},
-): string[] => {
-  const max = opts.max ?? 40;
+): string[] => learnVocabularyDetailed(transcripts, opts).map((e) => e.word);
+
+export const learnVocabularyDetailed = (
+  transcripts: string[],
+  opts: LearnVocabOptions = {},
+): LearnedVocabItem[] => {
+  const max = opts.max ?? 60;
   const excluded = new Set(
     Array.from(opts.excluded ?? []).map((word) => word.toLowerCase()),
   );
@@ -395,8 +465,14 @@ export const learnVocabulary = (
 
   const isCandidate = (token: string): boolean => {
     const lower = token.toLowerCase();
-    if (lower.length < 3) return false;
+    const strong = strongDistinctiveness(token) > 0;
+    // Recall: distinctive technical tokens / acronyms (mixed case, digits, or
+    // short ALL-CAPS runs like "AI", "ML", "UX") carry their own evidence of
+    // being a real term even at 2 characters — only bare words need the
+    // longer minimum to avoid noise from short common fragments.
+    if (lower.length < (strong ? 2 : 3)) return false;
     if (/^\d+$/.test(token)) return false;
+    if (NUMBER_WORDS.has(lower)) return false;
     if (COMMON_WORDS.has(lower)) return false;
     if (excluded.has(lower)) return false;
     return weightOf(token) > 0;
@@ -406,6 +482,7 @@ export const learnVocabulary = (
     if (!text) continue;
     for (const sentence of sentencesOf(text)) {
       const tokens = sentence.match(TOKEN_RE) ?? [];
+      const example = cleanExample(sentence);
       let prev: string | null = null;
 
       for (const token of tokens) {
@@ -419,16 +496,28 @@ export const learnVocabulary = (
               existing.weight = weight;
               existing.display = token;
             }
+            if (!existing.example && example) existing.example = example;
           } else {
-            unigrams.set(key, { display: token, count: 1, weight });
+            unigrams.set(key, { display: token, count: 1, weight, example });
           }
 
-          if (prev && /^[A-Z]/.test(prev) && /^[A-Z]/.test(token)) {
+          if (
+            prev &&
+            /^[A-Z]/.test(prev) &&
+            /^[A-Z]/.test(token) &&
+            isLikelyGenuinePhrase([prev, token])
+          ) {
             const phrase = `${prev} ${token}`;
             const bkey = phrase.toLowerCase();
             const bexisting = bigrams.get(bkey);
             if (bexisting) bexisting.count += 1;
-            else bigrams.set(bkey, { display: phrase, count: 1, weight: 4 });
+            else
+              bigrams.set(bkey, {
+                display: phrase,
+                count: 1,
+                weight: 4,
+                example,
+              });
           }
           prev = token;
         } else {
@@ -438,22 +527,36 @@ export const learnVocabulary = (
     }
   }
 
-  const THRESHOLD = 3;
+  // Lowered to 2 so it identifies more of the user's real vocabulary; the
+  // proper-noun / mid-sentence-caps safeguards above keep out "Alright/Hey" noise.
+  const THRESHOLD = 2;
+  // Recall: a single-word token whose own shape is strong evidence of being a
+  // real term (an acronym, a camelCase/PascalCase identifier, or something
+  // with a digit — e.g. "Kubernetes", "GPT4", "OAuth") is worth surfacing
+  // even on a single mention. The LLM `isTerm` check + user review is the
+  // backstop that keeps this from just importing noise. Multi-word phrases
+  // keep the higher bar — precision matters more once words are combined.
+  const thresholdFor = (entry: Entry): number =>
+    entry.weight >= 3 && !entry.display.includes(" ") ? 1 : THRESHOLD;
   const score = (entry: Entry): number =>
     entry.weight * Math.log(1 + entry.count);
 
   const candidates = [...bigrams.values(), ...unigrams.values()].filter(
-    (entry) => entry.count >= THRESHOLD,
+    (entry) => entry.count >= thresholdFor(entry),
   );
   candidates.sort((a, b) => score(b) - score(a) || b.count - a.count);
 
-  const result: string[] = [];
+  const result: LearnedVocabItem[] = [];
   const seen = new Set<string>();
   for (const entry of candidates) {
     const key = entry.display.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    result.push(entry.display);
+    result.push({
+      word: entry.display,
+      count: entry.count,
+      example: entry.example,
+    });
     if (result.length >= max) break;
   }
   return result;

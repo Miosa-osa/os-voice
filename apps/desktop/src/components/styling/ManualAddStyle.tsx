@@ -84,7 +84,7 @@ export function ManualAddStyle() {
               <CheckBoxIcon fontSize="small" sx={{ color: "text.disabled" }} />
             </Tooltip>
           ) : isActive ? (
-            <CheckBoxIcon fontSize="small" color="primary" />
+            <CheckBoxIcon fontSize="small" sx={{ color: "blue" }} />
           ) : (
             <CheckBoxOutlineBlankIcon fontSize="small" />
           ),
@@ -137,12 +137,7 @@ export function ManualAddStyle() {
   return (
     <MenuPopoverBuilder items={menuItems}>
       {({ ref, open }) => (
-        <Button
-          ref={ref}
-          onClick={open}
-          variant="contained"
-          startIcon={<Add />}
-        >
+        <Button ref={ref} onClick={open} variant="flat" startIcon={<Add />}>
           <FormattedMessage defaultMessage="Add Style" />
         </Button>
       )}

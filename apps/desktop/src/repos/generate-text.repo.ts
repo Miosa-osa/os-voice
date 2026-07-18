@@ -176,7 +176,12 @@ export class OllamaGenerateTextRepo extends BaseGenerateTextRepo {
 
   constructor(url: string, model: string, apiKey?: string) {
     super();
-    this.ollamaUrl = url;
+    // The OpenAI-compatible client posts to `${baseUrl}/chat/completions`.
+    // Ollama exposes that endpoint under `/v1`, so the base URL must end in
+    // `/v1` or every call 404s. Normalize here so callers can pass the plain
+    // Ollama root (e.g. http://127.0.0.1:11434) and still hit /v1/chat/completions.
+    const trimmed = url.replace(/\/+$/, "");
+    this.ollamaUrl = trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`;
     this.model = model;
     this.apiKey = apiKey || "ollama";
   }

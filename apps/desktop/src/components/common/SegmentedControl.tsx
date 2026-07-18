@@ -1,4 +1,4 @@
-import { Box, Tab, Tabs } from "@mui/material";
+import { Box, Tab, Tabs, type Theme } from "@mui/material";
 import { SyntheticEvent } from "react";
 
 export type SegmentedControlOption<Value extends string> = {
@@ -14,7 +14,10 @@ export type SegmentedControlProps<Value extends string> = {
   ariaLabel?: string;
 };
 
-const tabSx = {
+// Mode-aware: uses the theme's `shadow` token (which itself is already
+// tuned per light/dark scheme) and `level2` for hover, so both states stay
+// visible in either mode instead of only showing up on dark backgrounds.
+const tabSx = (theme: Theme) => ({
   textTransform: "none",
   minHeight: "unset",
   py: 1.25,
@@ -26,13 +29,13 @@ const tabSx = {
   "&.Mui-selected": {
     color: "text.primary",
     bgcolor: "background.paper",
-    boxShadow: "inset 0 1px 3px rgba(0,0,0,0.2), 0 1px 2px rgba(0,0,0,0.05)",
+    boxShadow: `inset 0 1px 3px ${theme.vars?.palette.shadow}, 0 1px 2px ${theme.vars?.palette.shadow}`,
   },
   "&:hover:not(.Mui-selected)": {
     color: "text.primary",
-    bgcolor: "rgba(255,255,255,0.05)",
+    bgcolor: theme.vars?.palette.level2,
   },
-};
+});
 
 export const SegmentedControl = <Value extends string>({
   value,

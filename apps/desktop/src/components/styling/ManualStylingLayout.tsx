@@ -95,17 +95,15 @@ export function ManualStylingLayout() {
       computeItemKey={(id) => id}
       renderItem={(id) => <ManualStylingRow key={id} id={id} />}
       emptyState={
-        <Stack
-          spacing={1}
-          alignItems="flex-start"
-          width={300}
-          alignSelf="center"
-          mx="auto"
-        >
-          <Typography variant="h6">
+        <Stack spacing={1} alignItems="center">
+          <Typography variant="h6" color="text.secondary">
             <FormattedMessage defaultMessage="No styles yet" />
           </Typography>
-          <Typography variant="body2">
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{ textAlign: "center", maxWidth: 320 }}
+          >
             <FormattedMessage defaultMessage="Create a style to customize how your voice transcriptions are formatted and refined." />
           </Typography>
         </Stack>

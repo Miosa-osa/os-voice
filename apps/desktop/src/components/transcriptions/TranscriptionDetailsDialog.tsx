@@ -1,8 +1,10 @@
+import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import ReplayRoundedIcon from "@mui/icons-material/ReplayRounded";
 import {
   Alert,
   Box,
   Button,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -15,6 +17,10 @@ import {
 import { getRec } from "@voquill/utilities";
 import { useMemo, useState } from "react";
 import { FormattedMessage } from "react-intl";
+import {
+  reviewTranscript,
+  TranscriptReview,
+} from "../../actions/insights.actions";
 import {
   closeTranscriptionDetailsDialog,
   openRetranscribeDialog,
@@ -73,6 +79,9 @@ export const TranscriptionDetailsDialog = () => {
   const [editText, setEditText] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [learnedCount, setLearnedCount] = useState<number | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [review, setReview] = useState<TranscriptReview | null>(null);
+  const [reviewError, setReviewError] = useState(false);
 
   const isRetranscribing = useAppStore((state) =>
     transcription?.id
@@ -251,15 +260,48 @@ export const TranscriptionDetailsDialog = () => {
 
                 <Box>
                   {editText === null ? (
-                    <Button
-                      size="small"
-                      onClick={() => {
-                        setEditText(finalTranscriptText ?? "");
-                        setLearnedCount(null);
-                      }}
-                    >
-                      <FormattedMessage defaultMessage="Correct this transcript" />
-                    </Button>
+                    <Stack direction="row" spacing={1} flexWrap="wrap">
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          setEditText(finalTranscriptText ?? "");
+                          setLearnedCount(null);
+                        }}
+                      >
+                        <FormattedMessage defaultMessage="Correct this transcript" />
+                      </Button>
+                      <Button
+                        size="small"
+                        startIcon={
+                          reviewing ? (
+                            <CircularProgress size={14} />
+                          ) : (
+                            <AutoAwesomeIcon />
+                          )
+                        }
+                        disabled={reviewing || !finalTranscriptText.trim()}
+                        onClick={async () => {
+                          setReviewing(true);
+                          setReviewError(false);
+                          setReview(null);
+                          try {
+                            const result =
+                              await reviewTranscript(finalTranscriptText);
+                            setReview(result);
+                          } catch {
+                            setReviewError(true);
+                          } finally {
+                            setReviewing(false);
+                          }
+                        }}
+                      >
+                        {reviewing ? (
+                          <FormattedMessage defaultMessage="Reviewing…" />
+                        ) : (
+                          <FormattedMessage defaultMessage="Review this" />
+                        )}
+                      </Button>
+                    </Stack>
                   ) : (
                     <Stack spacing={1}>
                       <TextField
@@ -311,6 +353,84 @@ export const TranscriptionDetailsDialog = () => {
                         <FormattedMessage defaultMessage="Saved" />
                       )}
                     </Alert>
+                  )}
+                  {reviewError && (
+                    <Alert severity="error" sx={{ mt: 1 }}>
+                      <FormattedMessage defaultMessage="Couldn't review this right now — the model may be unavailable." />
+                    </Alert>
+                  )}
+                  {review && (
+                    <Box
+                      sx={(theme) => ({
+                        mt: 1,
+                        p: 1.5,
+                        borderRadius: 1,
+                        border: 1,
+                        borderColor: "divider",
+                        bgcolor:
+                          theme.vars?.palette.level1 ??
+                          theme.palette.background.default,
+                      })}
+                    >
+                      {review.assessment && (
+                        <Typography
+                          variant="body2"
+                          fontWeight={700}
+                          sx={{ mb: 1 }}
+                        >
+                          {review.assessment}
+                        </Typography>
+                      )}
+                      {review.tips && review.tips.length > 0 && (
+                        <>
+                          <Typography variant="overline" color="text.secondary">
+                            <FormattedMessage defaultMessage="Fix these" />
+                          </Typography>
+                          <Stack spacing={0.5} sx={{ mb: 1, mt: 0.5 }}>
+                            {review.tips.map((tip, index) => (
+                              <Stack
+                                key={`review-tip-${index}`}
+                                direction="row"
+                                spacing={1}
+                                alignItems="flex-start"
+                              >
+                                <Box
+                                  sx={{
+                                    mt: "7px",
+                                    width: 6,
+                                    height: 6,
+                                    borderRadius: "50%",
+                                    bgcolor: "primary.main",
+                                    flexShrink: 0,
+                                  }}
+                                />
+                                <Typography variant="body2">{tip}</Typography>
+                              </Stack>
+                            ))}
+                          </Stack>
+                        </>
+                      )}
+                      {review.critique && (
+                        <>
+                          <Typography variant="overline" color="text.secondary">
+                            <FormattedMessage defaultMessage="Feedback" />
+                          </Typography>
+                          <Typography variant="body2" sx={{ mb: 1 }}>
+                            {review.critique}
+                          </Typography>
+                        </>
+                      )}
+                      {review.rewrite && (
+                        <>
+                          <Typography variant="overline" color="text.secondary">
+                            <FormattedMessage defaultMessage="Suggested rewrite" />
+                          </Typography>
+                          <Typography variant="body2" fontStyle="italic">
+                            {review.rewrite}
+                          </Typography>
+                        </>
+                      )}
+                    </Box>
                   )}
                 </Box>
               </Stack>

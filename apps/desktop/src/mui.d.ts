@@ -35,6 +35,14 @@ declare module "@mui/material/styles" {
   }
 }
 
+declare module "@mui/material/styles" {
+  // MUI's createTypography supports a custom `pxToRem` override at runtime
+  // (see createTypography.js) but doesn't expose it on TypographyVariantsOptions.
+  interface TypographyVariantsOptions {
+    pxToRem?: (px: number) => string;
+  }
+}
+
 declare module "@mui/material/Button" {
   interface ButtonPropsVariantOverrides {
     flat: true;
@@ -49,56 +57,5 @@ declare module "@mui/material/Card" {
 declare module "@mui/material/Paper" {
   interface PaperPropsVariantOverrides {
     flat: true;
-  }
-}
-
-declare module "@mui/material/styles" {
-  interface TypographyVariants {
-    displayLarge: React.CSSProperties;
-    displayMedium: React.CSSProperties;
-    displaySmall: React.CSSProperties;
-
-    headlineLarge: React.CSSProperties;
-    headlineMedium: React.CSSProperties;
-    headlineSmall: React.CSSProperties;
-
-    titleLarge: React.CSSProperties;
-    titleMedium: React.CSSProperties;
-    titleSmall: React.CSSProperties;
-
-    bodyLarge: React.CSSProperties;
-    bodyMedium: React.CSSProperties;
-    bodySmall: React.CSSProperties;
-
-    labelLarge: React.CSSProperties;
-    labelMedium: React.CSSProperties;
-    labelSmall: React.CSSProperties;
-  }
-
-  /* eslint-disable @typescript-eslint/no-empty-object-type */
-  interface TypographyVariantsOptions extends TypographyVariants {}
-}
-
-declare module "@mui/material/Typography" {
-  interface TypographyPropsVariantOverrides {
-    displayLarge: true;
-    displayMedium: true;
-    displaySmall: true;
-
-    headlineLarge: true;
-    headlineMedium: true;
-    headlineSmall: true;
-
-    titleLarge: true;
-    titleMedium: true;
-    titleSmall: true;
-
-    bodyLarge: true;
-    bodyMedium: true;
-    bodySmall: true;
-
-    labelLarge: true;
-    labelMedium: true;
-    labelSmall: true;
   }
 }

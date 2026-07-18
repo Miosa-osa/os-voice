@@ -5,7 +5,15 @@ import {
   MoreVert,
   PublicOutlined,
 } from "@mui/icons-material";
-import { IconButton, Radio, Stack, Tooltip, Typography } from "@mui/material";
+import {
+  Card,
+  IconButton,
+  Radio,
+  Stack,
+  Tooltip,
+  Typography,
+} from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import { getRec } from "@voquill/utilities";
 import { useCallback, useMemo } from "react";
 import { FormattedMessage } from "react-intl";
@@ -159,39 +167,54 @@ export const ManualStylingRow = ({ id }: ManualStylingRowProps) => {
   );
 
   return (
-    <ListTile
-      onClick={handleSelect}
-      leading={
-        <Radio
-          checked={isSelected}
-          size="small"
-          disableRipple
-          sx={{ mr: 1 }}
-          onClick={(e) => {
-            stopPropagation(e);
-            handleSelect();
-          }}
-          onMouseDown={stopPropagation}
-        />
-      }
-      title={tone?.name}
-      subtitle={
-        <Typography
-          variant="body2"
-          color="text.secondary"
-          sx={{
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-          }}
-        >
-          {tone?.description ||
-            formatPromptForPreview(tone?.promptTemplate ?? "-")}
-        </Typography>
-      }
-      trailing={trailing}
-      sx={{ backgroundColor: "level1", mb: 1, borderRadius: 1 }}
-    />
+    <Card
+      sx={(theme) => ({
+        mb: 1.5,
+        transition: "border-color 0.15s ease, background-color 0.15s ease",
+        ...(isSelected && {
+          borderColor: "blue",
+          backgroundColor: alpha(theme.palette.blue, 0.06),
+        }),
+      })}
+    >
+      <ListTile
+        onClick={handleSelect}
+        disableRipple
+        leading={
+          <Radio
+            checked={isSelected}
+            size="small"
+            disableRipple
+            sx={{ mr: 1 }}
+            onClick={(e) => {
+              stopPropagation(e);
+              handleSelect();
+            }}
+            onMouseDown={stopPropagation}
+          />
+        }
+        title={
+          <Typography variant="subtitle1" fontWeight={600} noWrap>
+            {tone?.name}
+          </Typography>
+        }
+        subtitle={
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+          >
+            {tone?.description ||
+              formatPromptForPreview(tone?.promptTemplate ?? "-")}
+          </Typography>
+        }
+        trailing={trailing}
+      />
+    </Card>
   );
 };

@@ -5,6 +5,17 @@ import dayjs from "dayjs";
 import { invokeEnterprise } from "../utils/enterprise.utils";
 import { BaseRepo } from "./base.repo";
 
+// The native `terms` table now carries an optional definition/category/timestamp
+// (migration 070). `@voquill/types` `Term` doesn't declare these, but term
+// objects flowing through the store may carry them, so we read/write them
+// structurally and preserve them across the local round-trip. Without this the
+// local backend would silently strip a definition on every save.
+type TermExtras = {
+  definition?: string | null;
+  category?: string | null;
+  lastDefinedAt?: number | null;
+};
+
 type LocalTerm = {
   id: string;
   createdAt: number;
@@ -13,25 +24,35 @@ type LocalTerm = {
   destinationValue: string;
   isReplacement: boolean;
   isDeleted: boolean;
+} & TermExtras;
+
+const toLocalTerm = (term: Term): LocalTerm => {
+  const extras = term as Term & TermExtras;
+  return {
+    id: term.id,
+    createdAt: dayjs(term.createdAt).valueOf(),
+    createdByUserId: "",
+    sourceValue: term.sourceValue,
+    destinationValue: term.destinationValue,
+    isReplacement: term.isReplacement,
+    isDeleted: false,
+    definition: extras.definition ?? null,
+    category: extras.category ?? null,
+    lastDefinedAt: extras.lastDefinedAt ?? null,
+  };
 };
 
-const toLocalTerm = (term: Term): LocalTerm => ({
-  id: term.id,
-  createdAt: dayjs(term.createdAt).valueOf(),
-  createdByUserId: "",
-  sourceValue: term.sourceValue,
-  destinationValue: term.destinationValue,
-  isReplacement: term.isReplacement,
-  isDeleted: false,
-});
-
-const fromLocalTerm = (term: LocalTerm): Term => ({
-  id: term.id,
-  createdAt: dayjs(term.createdAt).toISOString(),
-  sourceValue: term.sourceValue,
-  destinationValue: term.destinationValue,
-  isReplacement: term.isReplacement,
-});
+const fromLocalTerm = (term: LocalTerm): Term =>
+  ({
+    id: term.id,
+    createdAt: dayjs(term.createdAt).toISOString(),
+    sourceValue: term.sourceValue,
+    destinationValue: term.destinationValue,
+    isReplacement: term.isReplacement,
+    definition: term.definition ?? undefined,
+    category: term.category ?? undefined,
+    lastDefinedAt: term.lastDefinedAt ?? undefined,
+  }) as Term;
 
 export abstract class BaseTermRepo extends BaseRepo {
   abstract listTerms(): Promise<Term[]>;
