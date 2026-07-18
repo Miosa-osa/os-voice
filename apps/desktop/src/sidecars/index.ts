@@ -17,6 +17,13 @@ import {
 } from "./local-transcription.sidecar";
 import { toErrorMessage } from "./sidecar.utils";
 
+// Pre-warm uses a short silent buffer purely to force the whisper model context
+// to load into the engine's in-process cache. Length barely matters for cost
+// (whisper pads to a 30s mel and runs a single encode pass regardless), so 1s
+// @ 16kHz is comfortably above any minimum-input quirk while staying cheap.
+const WARMUP_SAMPLE_RATE = 16_000;
+const WARMUP_SAMPLE_COUNT = 16_000;
+
 export type {
   LocalSidecarDevice,
   LocalSidecarDownloadSnapshot,
@@ -149,6 +156,57 @@ class LocalTranscriptionSidecarFacade {
 
       throw error;
     }
+  }
+
+  /**
+   * Best-effort pre-warm: eagerly spawn the preferred local sidecar process and
+   * load the whisper model context into its in-process cache, so the FIRST
+   * dictation starts transcribing immediately instead of paying the
+   * spawn + model-load cold start.
+   *
+   * Safe by construction:
+   * - Never triggers a model download (bails if the model is not on disk).
+   * - Only touches the preferred sidecar and never flips the shared GPU->CPU
+   *   fallback flag, so a warmup failure can never degrade real dictations.
+   * - Mirrors the exact request path (same model + device cache key) a real
+   *   dictation uses, so the next dictation is a guaranteed cache hit.
+   * - Caller wraps this non-fatally; a throw here must never block a dictation.
+   *
+   * Returns true if the model context was warmed, false if it was skipped
+   * (e.g. the model is not downloaded yet).
+   */
+  async warmUp({
+    model,
+    preferGpu,
+    deviceId,
+  }: {
+    model: LocalWhisperModel;
+    preferGpu: boolean;
+    deviceId?: string;
+  }): Promise<boolean> {
+    const useGpu = preferGpu && !this.gpuUnavailable;
+    const sidecar = useGpu ? this.gpuSidecar : this.cpuSidecar;
+
+    // Eagerly start the sidecar process (spawn warm).
+    await sidecar.ensureStarted();
+
+    // Never kick off a background download during pre-warm; only warm models
+    // that are already present on disk.
+    const status = await sidecar.getModelStatus(model, false);
+    if (!status.downloaded) {
+      return false;
+    }
+
+    // Load + cache the whisper context by running a tiny silent transcription.
+    await sidecar.transcribe({
+      model,
+      samples: new Float32Array(WARMUP_SAMPLE_COUNT),
+      sampleRate: WARMUP_SAMPLE_RATE,
+      preferGpu: useGpu,
+      deviceId,
+    });
+
+    return true;
   }
 
   private async resolveRuntime(

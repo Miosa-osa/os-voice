@@ -11,6 +11,7 @@ import {
   handleGoogleAuthPayload,
 } from "../../actions/login.actions";
 import { refreshMember } from "../../actions/member.actions";
+import { prewarmLocalTranscription } from "../../actions/settings-local-transcription.actions";
 import { syncAutoLaunchSetting } from "../../actions/settings.actions";
 import { loadTones } from "../../actions/tone.actions";
 import { loadTools } from "../../actions/tool.actions";
@@ -18,6 +19,7 @@ import {
   migratePreferredMicrophoneToPreferences,
   refreshCurrentUser,
 } from "../../actions/user.actions";
+import { delayed } from "@voquill/utilities";
 import { useAsyncEffect } from "../../hooks/async.hooks";
 import { useIntervalAsync } from "../../hooks/helper.hooks";
 import { useTauriListen } from "../../hooks/tauri.hooks";
@@ -65,6 +67,15 @@ export const RootSideEffects = () => {
   useAsyncEffect(async () => {
     await syncAutoLaunchSetting();
   }, []);
+
+  // Pre-warm the local transcription sidecar + model a moment after startup so
+  // the first dictation skips the spawn + model-load cold start. Best-effort and
+  // non-fatal (guard rails + error handling live in the action); delayed so it
+  // does not compete with the initial data load above.
+  useAsyncEffect(async () => {
+    await delayed(2_000);
+    await prewarmLocalTranscription();
+  }, [userId]);
 
   useTauriListen<void>(REGISTER_CURRENT_APP_EVENT, async () => {
     await tryRegisterCurrentAppTarget();

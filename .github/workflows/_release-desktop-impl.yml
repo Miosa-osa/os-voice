@@ -31,6 +31,8 @@ jobs:
       dev_tag_name: ${{ steps.meta.outputs.dev_tag_name }}
       release_notes: ${{ steps.release_notes.outputs.release-notes }}
       release_body: ${{ steps.release_body.outputs.release_body }}
+      has_apple_signing: ${{ steps.signing.outputs.has_apple_signing }}
+      has_azure_signing: ${{ steps.signing.outputs.has_azure_signing }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -213,6 +215,56 @@ jobs:
             echo "release_flavor=${RELEASE_FLAVOR}"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Compute signing capability flags
+        # Presence-check the Apple (Developer ID + notarization) and Azure
+        # Trusted Signing secrets/vars for this run. Neither is required for
+        # a release to ship: when absent, the `build` job skips the
+        # corresponding signing/notarization steps and produces unsigned
+        # artifacts instead of failing. When the secrets ARE configured
+        # later, signing resumes automatically with no workflow edits.
+        id: signing
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_INSTALLER_SIGNING_IDENTITY: ${{ secrets.APPLE_INSTALLER_SIGNING_IDENTITY }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_CODE_SIGNING_NAME: ${{ vars.AZURE_CODE_SIGNING_NAME }}
+          AZURE_CERT_PROFILE_NAME: ${{ vars.AZURE_CERT_PROFILE_NAME }}
+        run: |
+          set -euo pipefail
+
+          has_apple_signing="false"
+          if [[ -n "${APPLE_CERTIFICATE}" && -n "${APPLE_CERTIFICATE_PASSWORD}" \
+                && -n "${APPLE_KEYCHAIN_PASSWORD}" && -n "${APPLE_API_KEY_BASE64}" \
+                && -n "${APPLE_API_KEY_ID}" && -n "${APPLE_API_ISSUER}" \
+                && -n "${APPLE_TEAM_ID}" && -n "${APPLE_SIGNING_IDENTITY}" \
+                && -n "${APPLE_INSTALLER_SIGNING_IDENTITY}" ]]; then
+            has_apple_signing="true"
+          fi
+
+          has_azure_signing="false"
+          if [[ -n "${AZURE_CLIENT_ID}" && -n "${AZURE_TENANT_ID}" \
+                && -n "${AZURE_SUBSCRIPTION_ID}" && -n "${AZURE_CODE_SIGNING_NAME}" \
+                && -n "${AZURE_CERT_PROFILE_NAME}" ]]; then
+            has_azure_signing="true"
+          fi
+
+          echo "Apple (macOS) code signing available: ${has_apple_signing}"
+          echo "Azure Trusted Signing (Windows) available: ${has_azure_signing}"
+
+          {
+            echo "has_apple_signing=${has_apple_signing}"
+            echo "has_azure_signing=${has_azure_signing}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Read release notes
         id: release_body
         env:
@@ -255,6 +307,15 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    # Linux is the only leg that MUST succeed for a release to promote (see
+    # `update-channel` below, which gates on `needs.build.result == 'success'`).
+    # macOS/Windows use `continue-on-error` per matrix entry so that a failure
+    # there (missing signing secrets producing a genuine build problem, a
+    # flaky runner, etc.) is still visible as a failed step/job in the run
+    # (nothing is hidden), but does NOT flip the aggregate `build` job result
+    # to `failure` and therefore does NOT block Linux from promoting. Combined
+    # with `fail-fast: false` so one leg's failure never cancels the others.
+    continue-on-error: ${{ matrix.allow_leg_failure }}
     strategy:
       fail-fast: false
       matrix:
@@ -267,6 +328,7 @@ jobs:
             node_platform: darwin
             artifact_name: desktop-macos
             require_gpu_sidecar: true
+            allow_leg_failure: true
 
           - label: Windows
             os: windows-latest
@@ -276,6 +338,7 @@ jobs:
             node_platform: win32
             artifact_name: desktop-windows
             require_gpu_sidecar: true
+            allow_leg_failure: true
 
           - label: Linux
             os: ubuntu-22.04
@@ -285,6 +348,7 @@ jobs:
             node_platform: linux
             artifact_name: desktop-linux
             require_gpu_sidecar: true
+            allow_leg_failure: false
     env:
       RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
       RELEASE_ENV: ${{ needs.metadata.outputs.release_env }}
@@ -436,8 +500,25 @@ jobs:
         run: |
           echo "CMAKE_TOOLCHAIN_FILE=${GITHUB_WORKSPACE}/packages/rust_transcription/cmake/macos-ci-toolchain.cmake" >> "$GITHUB_ENV"
 
-      - name: Import Apple signing certificate
+      - name: Report macOS signing status
         if: matrix.os == 'macos-14'
+        run: |
+          if [[ "${{ needs.metadata.outputs.has_apple_signing }}" == "true" ]]; then
+            echo "Apple Developer ID secrets present — building signed & notarized artifacts."
+          else
+            echo "Apple Developer ID secrets NOT present — skipping codesign/notarization; building unsigned artifacts."
+          fi
+
+      # The following signing/notarization steps only run when the full set of
+      # Apple secrets (APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD,
+      # KEYCHAIN_PASSWORD, APPLE_API_KEY_*, APPLE_TEAM_ID, APPLE_*_SIGNING_IDENTITY)
+      # is present (see `has_apple_signing` computed in the `metadata` job).
+      # When absent, tauri-action itself builds an unsigned .app (it only
+      # attempts signing when APPLE_SIGNING_IDENTITY is set), so no separate
+      # "unsigned" code path is needed for the .app/.dmg — only for the .pkg
+      # (see "Build and upload unsigned macOS PKG" below).
+      - name: Import Apple signing certificate
+        if: matrix.os == 'macos-14' && needs.metadata.outputs.has_apple_signing == 'true'
         id: import-macos-cert
         uses: apple-actions/import-codesign-certs@v2
         with:
@@ -450,12 +531,12 @@ jobs:
           p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
       - name: Allow codesign access to private keys (CI keychain)
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-14' && needs.metadata.outputs.has_apple_signing == 'true'
         run: |
           security set-key-partition-list -S apple-tool:,apple: -s -k "${{ secrets.KEYCHAIN_PASSWORD }}" build.keychain-db
 
       - name: Assert Developer ID Application identity is present
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-14' && needs.metadata.outputs.has_apple_signing == 'true'
         run: |
           set -euo pipefail
           out="$(security find-identity -v -p codesigning)"
@@ -466,7 +547,7 @@ jobs:
           }
 
       - name: Assert Developer ID Installer identity is present
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-14' && needs.metadata.outputs.has_apple_signing == 'true'
         run: |
           set -euo pipefail
           out="$(security find-identity -v -p basic)"
@@ -477,7 +558,7 @@ jobs:
           }
 
       - name: Prepare Apple notary API key
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-14' && needs.metadata.outputs.has_apple_signing == 'true'
         run: |
           set -euo pipefail
           echo "$APPLE_API_KEY_BASE64" | base64 -d > AuthKey.p8
@@ -485,7 +566,7 @@ jobs:
         shell: bash
 
       - name: Verify Apple signing identity
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-14' && needs.metadata.outputs.has_apple_signing == 'true'
         run: |
           set -euo pipefail
           keychain_path="${{ steps.import-macos-cert.outputs['keychain-path'] }}"
@@ -506,7 +587,7 @@ jobs:
           fi
 
       - name: Notary connectivity probe
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-14' && needs.metadata.outputs.has_apple_signing == 'true'
         run: |
           xcrun notarytool history \
             --key "${GITHUB_WORKSPACE}/AuthKey.p8" \
@@ -677,7 +758,7 @@ jobs:
           gh release upload "${RELEASE_TAG}" "${dmg_path}" --clobber
 
       - name: Build, sign, notarize, and upload macOS PKG
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-14' && needs.metadata.outputs.has_apple_signing == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -741,8 +822,75 @@ jobs:
 
           gh release upload "${RELEASE_TAG}" "${pkg_name}" --clobber
 
-      - name: Azure login for code signing
+      - name: Build and upload unsigned macOS PKG
+        # Fallback for when Apple signing secrets are absent: still ship a
+        # .pkg installer (unsigned, not notarized). Users installing an
+        # unsigned/unnotarized .pkg will need to bypass Gatekeeper
+        # (System Settings > Privacy & Security > "Open Anyway", or
+        # `xattr -dr com.apple.quarantine`) — same caveat as the unsigned
+        # .app/.dmg produced by the "Build and publish" / DMG steps above.
+        if: matrix.os == 'macos-14' && needs.metadata.outputs.has_apple_signing != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.metadata.outputs.tag_name }}
+          RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+          RELEASE_ENV: ${{ needs.metadata.outputs.release_env }}
+        run: |
+          set -euo pipefail
+
+          bundle_dir="apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos"
+          app_bundle_path="$(find "${bundle_dir}" -maxdepth 1 -type d -name '*.app' | head -n 1)"
+          if [[ -z "${app_bundle_path}" ]]; then
+            echo "No .app bundle found under ${bundle_dir}" >&2
+            ls -la "${bundle_dir}" || true
+            exit 1
+          fi
+
+          case "${RELEASE_ENV}" in
+            enterprise)
+              pkg_name="VoquillEnterprise_${RELEASE_VERSION}_universal_unsigned.pkg"
+              bundle_identifier="com.voquill.desktop.enterprise"
+              ;;
+            enterprise-dev)
+              pkg_name="VoquillEnterpriseDev_${RELEASE_VERSION}_universal_unsigned.pkg"
+              bundle_identifier="com.voquill.desktop.enterprise-dev"
+              ;;
+            *)
+              pkg_name="Voquill_${RELEASE_VERSION}_universal_unsigned.pkg"
+              bundle_identifier="com.voquill.desktop"
+              ;;
+          esac
+
+          pkgbuild \
+            --component "${app_bundle_path}" \
+            --install-location /Applications \
+            --identifier "${bundle_identifier}" \
+            --version "${RELEASE_VERSION}" \
+            "${pkg_name}"
+
+          echo "Built unsigned PKG (no productsign/notarization): ${pkg_name}"
+          gh release upload "${RELEASE_TAG}" "${pkg_name}" --clobber
+
+      - name: Report Windows signing status
         if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          if ("${{ needs.metadata.outputs.has_azure_signing }}" -eq "true") {
+            Write-Host "Azure Trusted Signing secrets/vars present — signing Windows installers."
+          } else {
+            Write-Host "Azure Trusted Signing secrets/vars NOT present — shipping unsigned Windows installers (as produced by tauri-action)."
+          }
+
+      # The following Azure Trusted Signing steps only run when
+      # AZURE_CLIENT_ID/AZURE_TENANT_ID/AZURE_SUBSCRIPTION_ID (secrets) and
+      # AZURE_CODE_SIGNING_NAME/AZURE_CERT_PROFILE_NAME (vars) are all present
+      # (see `has_azure_signing` computed in the `metadata` job). When absent,
+      # the NSIS/portable installers already produced (unsigned) by
+      # tauri-action / "Build Windows portable installer" are shipped as-is —
+      # "Upload Windows portable installer" below runs unconditionally.
+      - name: Azure login for code signing
+        if: matrix.os == 'windows-latest' && needs.metadata.outputs.has_azure_signing == 'true'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -750,7 +898,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Sign Windows NSIS installer
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-latest' && needs.metadata.outputs.has_azure_signing == 'true'
         uses: azure/trusted-signing-action@v0
         with:
           endpoint: https://eus.codesigning.azure.net/
@@ -760,7 +908,7 @@ jobs:
           files-folder-filter: exe
 
       - name: Verify NSIS installer signature
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-latest' && needs.metadata.outputs.has_azure_signing == 'true'
         shell: pwsh
         run: |
           $nsisDir = "D:\cargo\release\bundle\nsis"
@@ -784,7 +932,7 @@ jobs:
           Write-Host "All NSIS installers signed successfully"
 
       - name: Re-upload signed NSIS installer
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-latest' && needs.metadata.outputs.has_azure_signing == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -822,7 +970,7 @@ jobs:
           pnpm run tauri:build
 
       - name: Sign Windows portable installer
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-latest' && needs.metadata.outputs.has_azure_signing == 'true'
         uses: azure/trusted-signing-action@v0
         with:
           endpoint: https://eus.codesigning.azure.net/
@@ -833,7 +981,7 @@ jobs:
           file-digest: SHA256
 
       - name: Verify portable installer signature
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-latest' && needs.metadata.outputs.has_azure_signing == 'true'
         shell: pwsh
         run: |
           $installerExe = "D:\cargo\release\voquill-installer.exe"
@@ -888,6 +1036,18 @@ jobs:
   update-channel:
     name: Update channel release
     needs: [metadata, build]
+    # `build` is a matrix job where macOS/Windows legs set
+    # `continue-on-error: ${{ matrix.allow_leg_failure }}` (true for those
+    # two, false for Linux). That means `needs.build.result` reports
+    # 'success' as long as the Linux leg succeeded, even if macOS and/or
+    # Windows failed outright (e.g. genuine compile error, not just a
+    # signing gap) — so promotion to the channel tag proceeds off the back
+    # of a Linux-only (or Linux+partial) release. If Linux itself fails,
+    # `needs.build.result` is 'failure' and this job correctly does not run.
+    if: |
+      always() &&
+      needs.metadata.result == 'success' &&
+      needs.build.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -929,7 +1089,22 @@ jobs:
     name: Publish to APT repository
     needs: [metadata, build]
     runs-on: ubuntu-latest
-    if: needs.metadata.outputs.release_env != 'enterprise' && needs.metadata.outputs.release_env != 'enterprise-dev'
+    # DISABLED BY DEFAULT: this job clones and pushes into
+    # `github.com/voquill/apt`, an UPSTREAM repo we do not control (not under
+    # Miosa-osa). Left as-is it would fail (no push access with our token) or,
+    # worse, publish under the wrong project's name if credentials happened to
+    # work. Gated on a repository/organization VARIABLE that is unset by
+    # default, so this never silently pushes anywhere.
+    #
+    # To re-enable once a Miosa-osa/apt repo exists:
+    #   1. Update the "Clone APT repository" step below to clone
+    #      Miosa-osa/apt instead of voquill/apt.
+    #   2. Set the ENABLE_UPSTREAM_PACKAGE_PUBLISH repository/organization
+    #      variable to "true" (Settings > Secrets and variables > Actions > Variables).
+    if: |
+      vars.ENABLE_UPSTREAM_PACKAGE_PUBLISH == 'true' &&
+      needs.metadata.outputs.release_env != 'enterprise' &&
+      needs.metadata.outputs.release_env != 'enterprise-dev'
     permissions:
       contents: read
     env:
@@ -1004,7 +1179,20 @@ jobs:
     name: Publish to RPM repository
     needs: [metadata, build]
     runs-on: ubuntu-latest
-    if: needs.metadata.outputs.release_env != 'enterprise' && needs.metadata.outputs.release_env != 'enterprise-dev'
+    # DISABLED BY DEFAULT: this job clones and pushes into
+    # `github.com/voquill/rpm`, an UPSTREAM repo we do not control (not under
+    # Miosa-osa). Gated on a repository/organization VARIABLE that is unset
+    # by default, so this never silently pushes anywhere.
+    #
+    # To re-enable once a Miosa-osa/rpm repo exists:
+    #   1. Update the "Clone RPM repository" step below to clone
+    #      Miosa-osa/rpm instead of voquill/rpm.
+    #   2. Set the ENABLE_UPSTREAM_PACKAGE_PUBLISH repository/organization
+    #      variable to "true" (Settings > Secrets and variables > Actions > Variables).
+    if: |
+      vars.ENABLE_UPSTREAM_PACKAGE_PUBLISH == 'true' &&
+      needs.metadata.outputs.release_env != 'enterprise' &&
+      needs.metadata.outputs.release_env != 'enterprise-dev'
     permissions:
       contents: read
     env:
@@ -1082,7 +1270,25 @@ jobs:
     name: Publish to Homebrew tap
     needs: [metadata, build]
     runs-on: ubuntu-latest
-    if: needs.metadata.outputs.release_env != 'enterprise' && needs.metadata.outputs.release_env != 'enterprise-dev'
+    # DISABLED BY DEFAULT: this job clones and pushes into
+    # `github.com/voquill/homebrew-voquill`, an UPSTREAM repo we do not
+    # control (not under Miosa-osa). Gated on a repository/organization
+    # VARIABLE that is unset by default, so this never silently pushes
+    # anywhere. It also only has a signed-DMG code path today
+    # (`*_universal.dmg`); once Apple signing is optional, unsigned macOS
+    # builds still produce a DMG with the same naming (see the "Build and
+    # upload macOS DMG" step, which does not depend on signing), so this
+    # job would still find an artifact to publish if re-enabled.
+    #
+    # To re-enable once a Miosa-osa/homebrew-voquill tap exists:
+    #   1. Update the "Clone Homebrew tap repository" step below to clone
+    #      Miosa-osa/homebrew-voquill instead of voquill/homebrew-voquill.
+    #   2. Set the ENABLE_UPSTREAM_PACKAGE_PUBLISH repository/organization
+    #      variable to "true" (Settings > Secrets and variables > Actions > Variables).
+    if: |
+      vars.ENABLE_UPSTREAM_PACKAGE_PUBLISH == 'true' &&
+      needs.metadata.outputs.release_env != 'enterprise' &&
+      needs.metadata.outputs.release_env != 'enterprise-dev'
     permissions:
       contents: read
     env:
