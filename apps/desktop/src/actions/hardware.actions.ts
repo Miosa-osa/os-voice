@@ -57,9 +57,29 @@ export const setLiteMode = async (enabled: boolean): Promise<void> => {
   await setSelectedToneId(VERBATIM_TONE_ID);
 };
 
-// Runtime safety net: if a local GPU transcription fails, switch to CPU with a
-// size-appropriate model so the user is never stuck on an unusable GPU config.
-export const fallbackToCpuIfGpuFailed = async (): Promise<boolean> => {
+// Only a genuinely GPU/device-related failure should trigger the downgrade —
+// not a network/IPC/timeout/audio error, which would wrongly strand a working
+// GPU user on the slow CPU model.
+const isGpuError = (error: unknown): boolean => {
+  const text = (
+    error instanceof Error
+      ? `${error.name} ${error.message}`
+      : String(error ?? "")
+  ).toLowerCase();
+  return /cuda|vulkan|\bgpu\b|device|vram|out of memory|\boom\b|cublas|no kernel image|metal/.test(
+    text,
+  );
+};
+
+// Runtime safety net: if a local GPU transcription fails *with a GPU-specific
+// error*, switch to CPU with a size-appropriate model so the user is never stuck
+// on an unusable GPU config.
+export const fallbackToCpuIfGpuFailed = async (
+  error: unknown,
+): Promise<boolean> => {
+  if (!isGpuError(error)) {
+    return false;
+  }
   const prefs = getMyUserPreferences(getAppState());
   const device = prefs?.transcriptionDevice ?? "";
   if (prefs?.transcriptionMode !== "local" || !device.startsWith("gpu")) {
