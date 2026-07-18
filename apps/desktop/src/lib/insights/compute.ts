@@ -789,6 +789,170 @@ export const deriveHowYouSpeak = (
   return `You speak${pace} ${lengthBit}, ${fillerBit}${questionBit}.`;
 };
 
+// A 2-3 sentence, data-grounded "portrait" — no invented biography, just a
+// read of the measured pace/clarity/questioning signals plus the topics the
+// person actually keeps returning to.
+export const derivePortrait = (
+  words: WordAnalysis,
+  topics: string[],
+): string => {
+  const paceDescriptor =
+    words.avgSentenceLength > 22
+      ? "expansive"
+      : words.avgSentenceLength > 0 && words.avgSentenceLength < 8
+        ? "direct"
+        : "measured";
+  const topicsBit =
+    topics.length > 0
+      ? ` who keeps returning to ${topics.slice(0, 3).join(", ")}`
+      : "";
+  const fillerBit =
+    words.fillerRate <= 2
+      ? "You speak with unusual clarity, rarely reaching for filler words."
+      : words.fillerRate >= 6
+        ? "You speak loosely and conversationally, thinking out loud as you go."
+        : "You speak in a steady, natural rhythm.";
+  const questionBit =
+    words.questionRatio >= 20
+      ? " You ask a lot of questions along the way — curiosity shows up in how you talk, not just what you say."
+      : "";
+  return `You're a ${paceDescriptor} communicator${topicsBit}. ${fillerBit}${questionBit}`;
+};
+
+// Personality traits derived only from measurable speech signals — no
+// fabricated psychology, just what the numbers actually support.
+export const derivePersonality = (words: WordAnalysis): string[] => {
+  const traits: string[] = [];
+  if (words.fillerRate <= 2) traits.push("Articulate");
+  if (words.questionRatio >= 20) traits.push("Inquisitive");
+  if (words.avgSentenceLength > 22) {
+    traits.push("Expansive");
+  } else if (words.avgSentenceLength > 0 && words.avgSentenceLength < 8) {
+    traits.push("Direct");
+  }
+  if (words.vocabularySize >= 600) traits.push("Wide-ranging thinker");
+  if (traits.length === 0 && words.avgSentenceLength > 0) {
+    traits.push("Steady and consistent");
+  }
+  return traits.slice(0, 4);
+};
+
+// Modest, topic-grounded motivations — what someone talks about repeatedly is
+// the best offline signal we have for what drives them.
+export const deriveMotivations = (topics: string[]): string[] =>
+  topics
+    .slice(0, 3)
+    .map((topic) => `Building and moving things forward on ${topic}`);
+
+// Picks the single strongest measured stat and phrases it as the person's
+// standout communication trait.
+export const deriveCommunicationSuperpower = (
+  words: WordAnalysis,
+): string | undefined => {
+  const candidates: { score: number; text: string }[] = [];
+  if (words.fillerRate <= 2) {
+    candidates.push({
+      score: (3 - words.fillerRate) * 10,
+      text: `Clarity — you speak with almost no filler words (~${words.fillerRate} per 100), so your point lands clean.`,
+    });
+  }
+  if (words.avgSentenceLength >= 6 && words.avgSentenceLength <= 20) {
+    candidates.push({
+      score: 15,
+      text: `Pacing — your sentences (~${words.avgSentenceLength} words) are easy to follow without losing depth.`,
+    });
+  }
+  if (words.vocabularySize >= 500) {
+    candidates.push({
+      score: words.vocabularySize / 50,
+      text: `Range — a vocabulary of ${words.vocabularySize.toLocaleString()} distinct words gives you precise language for nuance.`,
+    });
+  }
+  if (words.questionRatio >= 20) {
+    candidates.push({
+      score: words.questionRatio,
+      text: `Curiosity — ${words.questionRatio}% of what you say is framed as a question, drawing others into the conversation.`,
+    });
+  }
+  if (candidates.length === 0) return undefined;
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0].text;
+};
+
+// Kind, honest read of weak stats — every line is anchored to a real number,
+// never a vague personality judgment.
+export const deriveBlindSpots = (words: WordAnalysis): string[] => {
+  const spots: string[] = [];
+  if (words.fillerRate >= 6) {
+    spots.push(
+      `Filler words creep in fairly often (~${words.fillerRate} per 100) — they can dilute a strong point.`,
+    );
+  }
+  if (words.avgSentenceLength > 26) {
+    spots.push(
+      `Sentences can run long (~${words.avgSentenceLength} words), which sometimes buries the headline.`,
+    );
+  }
+  if (words.questionRatio >= 35) {
+    spots.push(
+      `A lot of your phrasing comes out as questions (${words.questionRatio}%) — it can read as less certain than you actually are.`,
+    );
+  }
+  if (words.vocabularySize > 0 && words.vocabularySize < 150) {
+    spots.push(
+      "Vocabulary is still narrow in the sample so far — it may read as repetitive until there's more data.",
+    );
+  }
+  return spots.slice(0, 3);
+};
+
+// A short, grounded read on how the measured pace/clarity likely comes
+// across to a listener. Returns undefined when there's no real signal yet.
+export const deriveHowOthersExperienceYou = (
+  words: WordAnalysis,
+): string | undefined => {
+  if (words.avgSentenceLength === 0) return undefined;
+  const tone =
+    words.fillerRate <= 2
+      ? "composed and deliberate"
+      : words.fillerRate >= 6
+        ? "casual and unfiltered"
+        : "relaxed but clear";
+  const pacing =
+    words.avgSentenceLength > 22
+      ? "with a lot of context and detail"
+      : words.avgSentenceLength < 8
+        ? "in short, punchy bursts"
+        : "at an easy, conversational pace";
+  return `People likely experience you as ${tone}, speaking ${pacing}.`;
+};
+
+// Recurring cognitive/thinking patterns, inferred from question-asking,
+// sentence structure, and topic persistence. Returns an empty list rather
+// than inventing patterns when there's no real signal.
+export const deriveMindsetPatterns = (
+  words: WordAnalysis,
+  topics: string[],
+): string[] => {
+  const patterns: string[] = [];
+  if (words.questionRatio >= 20) {
+    patterns.push(
+      "You think out loud by questioning — testing ideas as you speak them.",
+    );
+  }
+  if (words.avgSentenceLength > 22) {
+    patterns.push(
+      "You build ideas layer by layer instead of stating the conclusion upfront.",
+    );
+  }
+  if (topics.length >= 3) {
+    patterns.push(
+      `You circle back to a consistent set of themes — ${topics.slice(0, 3).join(", ")} — across sessions.`,
+    );
+  }
+  return patterns.slice(0, 3);
+};
+
 // Compute-backed fallback profile: derives real topics, quirks, and a
 // "how you speak" read purely from the measured data, so the deep sections of
 // the profile aren't empty when the LLM is unavailable or liteMode is on.
@@ -798,16 +962,28 @@ export const templatedProfile = (
   words?: WordAnalysis,
 ): AiVoiceProfile => {
   const analysis = words ?? computeWordAnalysis(transcriptions);
+  const topics = deriveTopics(transcriptions);
+  const personality = derivePersonality(analysis);
+  const motivations = deriveMotivations(topics);
+  const blindSpots = deriveBlindSpots(analysis);
+  const mindsetPatterns = deriveMindsetPatterns(analysis, topics);
   return {
     name: base.name,
     identity: base.description,
     traits: [],
-    topics: deriveTopics(transcriptions),
+    topics,
     style: "",
     quirks: deriveQuirks(analysis),
     howYouSpeak: deriveHowYouSpeak(analysis, base),
     whatYouCareAbout: deriveWhatYouCareAbout(transcriptions),
     ubiquitousLanguage: deriveUbiquitousLanguage(transcriptions),
+    portrait: derivePortrait(analysis, topics),
+    personality: personality.length > 0 ? personality : undefined,
+    motivations: motivations.length > 0 ? motivations : undefined,
+    communicationSuperpower: deriveCommunicationSuperpower(analysis),
+    blindSpots: blindSpots.length > 0 ? blindSpots : undefined,
+    howOthersExperienceYou: deriveHowOthersExperienceYou(analysis),
+    mindsetPatterns: mindsetPatterns.length > 0 ? mindsetPatterns : undefined,
     coaching: templatedCoaching(analysis),
     generated: false,
   };

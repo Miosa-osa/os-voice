@@ -38,6 +38,12 @@ import { getMyUserPreferences } from "../utils/user.utils";
 const PROFILE_MODEL = "gpt-oss:120b-cloud";
 const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 
+// Bump whenever the profile schema/prompt gains depth. A stored profile from an
+// older version (or a templated fallback generated while the cloud model was
+// unreachable) is treated as stale and regenerated, so users always see the
+// latest, deepest profile instead of a shallow cached one.
+const PROFILE_VERSION = 2;
+
 export const loadInsights = async (): Promise<void> => {
   produceAppState((draft) => {
     draft.insights.status = "loading";
@@ -98,6 +104,13 @@ export const generateVoiceProfile = async (opts?: {
   let shouldRegen = opts?.force === true;
   if (!shouldRegen) {
     if (!latest) {
+      shouldRegen = true;
+    } else if ((latest.version ?? 0) < PROFILE_VERSION) {
+      // Newer/deeper profile schema available — upgrade the stale cached one.
+      shouldRegen = true;
+    } else if (latest.profile.generated === false) {
+      // Last profile was a templated fallback (cloud model was down at the
+      // time, e.g. the /v1 404). Now that it may be reachable, try for real.
       shouldRegen = true;
     } else if (milestone > latest.milestone) {
       shouldRegen = true;
@@ -199,6 +212,7 @@ export const generateVoiceProfile = async (opts?: {
     catchphrase: base.catchphrase,
     mostUsedWord: base.mostUsedWord,
     stats,
+    version: PROFILE_VERSION,
   };
 
   produceAppState((draft) => {

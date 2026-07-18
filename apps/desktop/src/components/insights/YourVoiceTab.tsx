@@ -9,7 +9,9 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
+import { alpha, useTheme } from "@mui/material/styles";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
+import BoltRoundedIcon from "@mui/icons-material/BoltRounded";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import TrendingDownIcon from "@mui/icons-material/TrendingDown";
@@ -47,6 +49,34 @@ const ChipRow = ({ items }: { items: string[] }) =>
     </Stack>
   );
 
+const BulletList = ({
+  items,
+  color = "text.secondary",
+}: {
+  items: string[];
+  color?: string;
+}) => (
+  <Stack spacing={0.75}>
+    {items.map((item, i) => (
+      <Stack key={i} direction="row" spacing={1} alignItems="flex-start">
+        <Box
+          sx={{
+            mt: "7px",
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            bgcolor: color,
+            flexShrink: 0,
+          }}
+        />
+        <Typography variant="body2" color="textSecondary">
+          {item}
+        </Typography>
+      </Stack>
+    ))}
+  </Stack>
+);
+
 const CoachingGroup = ({
   color,
   label,
@@ -63,25 +93,9 @@ const CoachingGroup = ({
     >
       {label}
     </Typography>
-    <Stack spacing={0.75} sx={{ mt: 0.5 }}>
-      {items.map((item, i) => (
-        <Stack key={i} direction="row" spacing={1} alignItems="flex-start">
-          <Box
-            sx={{
-              mt: "7px",
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              bgcolor: color,
-              flexShrink: 0,
-            }}
-          />
-          <Typography variant="body2" color="textSecondary">
-            {item}
-          </Typography>
-        </Stack>
-      ))}
-    </Stack>
+    <Box sx={{ mt: 0.5 }}>
+      <BulletList items={items} color={color} />
+    </Box>
   </Box>
 );
 
@@ -132,6 +146,7 @@ const LockedSection = ({
 
 export const YourVoiceTab = () => {
   const intl = useIntl();
+  const theme = useTheme();
   const { events, transcriptions, terms } = useInsightsSources();
   const aiProfile = useAppStore((s) => s.insights.aiProfile);
   const aiStatus = useAppStore((s) => s.insights.aiProfileStatus);
@@ -330,6 +345,56 @@ export const YourVoiceTab = () => {
         </Stack>
       </Card>
 
+      {aiProfile?.portrait && (
+        <Card
+          variant="outlined"
+          sx={{
+            p: 3,
+            borderRadius: 3,
+            borderColor: alpha(theme.palette.primary.main, 0.3),
+            background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.1)}, ${alpha(theme.palette.primary.main, 0.02)})`,
+          }}
+        >
+          <Stack spacing={1}>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <AutoAwesomeIcon color="primary" fontSize="small" />
+              <Typography variant="overline" color="primary" fontWeight={700}>
+                <FormattedMessage defaultMessage="Your portrait" />
+              </Typography>
+            </Stack>
+            <Typography variant="h6" fontWeight={500} sx={{ lineHeight: 1.5 }}>
+              {aiProfile.portrait}
+            </Typography>
+          </Stack>
+        </Card>
+      )}
+
+      {aiProfile && (aiProfile.personality?.length ?? 0) > 0 && (
+        <Section title={<FormattedMessage defaultMessage="Personality" />}>
+          <ChipRow items={aiProfile.personality ?? []} />
+        </Section>
+      )}
+
+      {aiProfile && (aiProfile.motivations?.length ?? 0) > 0 && (
+        <Section title={<FormattedMessage defaultMessage="What drives you" />}>
+          <BulletList
+            items={aiProfile.motivations ?? []}
+            color="primary.main"
+          />
+        </Section>
+      )}
+
+      {aiProfile && (aiProfile.mindsetPatterns?.length ?? 0) > 0 && (
+        <Section
+          title={<FormattedMessage defaultMessage="How your mind moves" />}
+        >
+          <BulletList
+            items={aiProfile.mindsetPatterns ?? []}
+            color="info.main"
+          />
+        </Section>
+      )}
+
       {aiProfile?.howYouThink && (
         <Section title={<FormattedMessage defaultMessage="How you think" />}>
           <Typography variant="body2" color="textSecondary">
@@ -366,6 +431,21 @@ export const YourVoiceTab = () => {
       {aiProfile && aiProfile.quirks.length > 0 && (
         <Section title={<FormattedMessage defaultMessage="Speech quirks" />}>
           <ChipRow items={aiProfile.quirks} />
+        </Section>
+      )}
+
+      {aiProfile?.communicationSuperpower && (
+        <Section
+          title={
+            <FormattedMessage defaultMessage="Your communication superpower" />
+          }
+        >
+          <Stack direction="row" spacing={1.5} alignItems="flex-start">
+            <BoltRoundedIcon color="primary" sx={{ mt: "2px" }} />
+            <Typography variant="body1" fontWeight={600}>
+              {aiProfile.communicationSuperpower}
+            </Typography>
+          </Stack>
         </Section>
       )}
 
@@ -421,6 +501,30 @@ export const YourVoiceTab = () => {
           unlockAt={WORD_ANALYSIS_UNLOCK_WORDS}
           totalWords={totalWords}
         />
+      )}
+
+      {aiProfile?.howOthersExperienceYou && (
+        <Section
+          title={<FormattedMessage defaultMessage="How you come across" />}
+        >
+          <Typography variant="body2" color="textSecondary">
+            {aiProfile.howOthersExperienceYou}
+          </Typography>
+        </Section>
+      )}
+
+      {aiProfile && (aiProfile.blindSpots?.length ?? 0) > 0 && (
+        <Section
+          title={<FormattedMessage defaultMessage="Blind spots" />}
+          description={
+            <FormattedMessage defaultMessage="Patterns worth noticing — not judgments, just honest observations." />
+          }
+        >
+          <BulletList
+            items={aiProfile.blindSpots ?? []}
+            color="text.secondary"
+          />
+        </Section>
       )}
 
       {(() => {

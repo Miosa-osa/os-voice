@@ -14,6 +14,15 @@ export type AiVoiceProfile = {
   expertise?: string[];
   howYouSpeak?: string;
   ubiquitousLanguage?: string[];
+  // Rich "identifies me" layer — the portrait that makes the profile feel like
+  // it genuinely gets the person, not just a stats readout.
+  portrait?: string;
+  personality?: string[];
+  motivations?: string[];
+  communicationSuperpower?: string;
+  blindSpots?: string[];
+  howOthersExperienceYou?: string;
+  mindsetPatterns?: string[];
   // Coaching layer: turns the profile from a mirror into a coach.
   coaching?: Coaching;
   generated: boolean;
@@ -46,4 +55,8 @@ export type StoredVoiceProfile = {
   // Optional for backward compatibility with profiles persisted before this
   // field existed.
   stats?: CoachingSnapshot;
+  // Schema/prompt version this profile was generated under. When the current
+  // PROFILE_VERSION is newer, the profile is regenerated so users always get the
+  // latest depth instead of a stale shallow cache. Absent == 0 (pre-versioning).
+  version?: number;
 };

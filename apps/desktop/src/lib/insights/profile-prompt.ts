@@ -75,7 +75,7 @@ ${contextBreakdown ? `${contextBreakdown}\n` : ""}
 SAMPLES (verbatim things they said):
 ${sample}
 
-Be deep and specific — this should feel like it genuinely *gets* them. Use the app-context and tone breakdown above to notice if they speak differently in different contexts (e.g. terser while coding, more expansive while writing) and reflect that where it's genuinely visible in the samples. Return a JSON object with exactly these keys:
+Go DEEP. This should read like a perceptive person who has listened to hours of them talking and genuinely *gets* who they are — their mind, their drives, how they come across — not a stats readout. Read between the lines of the samples: infer personality, motivations and thinking style from HOW they say things, not just what. Be specific and grounded in the evidence, warm but honest. Use the app-context and tone breakdown to notice if they speak differently in different contexts (terser while coding, more expansive while writing) and reflect that where it's visible. Return a JSON object with exactly these keys:
 {
   "name": "a short evocative persona name that captures them (e.g. The Late-Night Builder)",
   "identity": "2-3 sentences addressed to them, e.g. 'You communicate like... You frequently...'",
@@ -88,6 +88,13 @@ Be deep and specific — this should feel like it genuinely *gets* them. Use the
   "expertise": ["2-5 domains or skills they clearly know well, evidenced by the samples"],
   "howYouSpeak": "2-3 sentences of real linguistic analysis: sentence structure, pacing, directness, formality, energy, filler habits",
   "ubiquitousLanguage": ["6-12 of their CHARACTERISTIC recurring words/phrases/terms — the vocabulary they live in — pulled verbatim from the samples"],
+  "portrait": "a rich 4-6 sentence portrait of this person addressed to them ('You are someone who...') — weave together who they are, how their mind works, what they're building toward and how they come across. This is the centerpiece; make it feel uncannily accurate and specific to THEM, grounded in the samples.",
+  "personality": ["4-6 personality traits/dispositions inferred from how they speak (e.g. driven, impatient with fluff, playful, big-picture, detail-obsessed) — not speech mechanics, actual character"],
+  "motivations": ["3-5 things that clearly drive them — goals, ambitions, what they're chasing or trying to build, evidenced by the samples"],
+  "communicationSuperpower": "one sentence naming the single most distinctive strength in how they communicate",
+  "blindSpots": ["2-4 patterns that may quietly hold them back or trip up listeners — honest but kind, grounded in what you actually see"],
+  "howOthersExperienceYou": "2-3 sentences on how they likely come across to the people on the other end — the impression they make",
+  "mindsetPatterns": ["3-5 recurring mental/cognitive patterns — how they frame problems, jump between ideas, revisit themes, or reason under pressure"],
   "recentActivity": "one sentence starting 'Lately you've been...' summarizing their most recent dictations",
   "tone": "1-3 words for their tone/energy (e.g. assertive, measured, enthusiastic)",
   "whatsChanged": "one short sentence on what's shifted since the previous profile, or '' if none/unknown",
@@ -139,6 +146,13 @@ export const parseProfileResponse = (text: string): AiVoiceProfile | null => {
       expertise: arr(p.expertise),
       howYouSpeak: str(p.howYouSpeak),
       ubiquitousLanguage: arr(p.ubiquitousLanguage),
+      portrait: str(p.portrait),
+      personality: arr(p.personality),
+      motivations: arr(p.motivations),
+      communicationSuperpower: str(p.communicationSuperpower),
+      blindSpots: arr(p.blindSpots),
+      howOthersExperienceYou: str(p.howOthersExperienceYou),
+      mindsetPatterns: arr(p.mindsetPatterns),
       recentActivity: str(p.recentActivity),
       tone: str(p.tone),
       whatsChanged: str(p.whatsChanged),
