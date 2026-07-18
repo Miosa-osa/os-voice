@@ -12,6 +12,7 @@ import {
   milestoneFor,
   PROFILE_UNLOCK_WORDS,
   sampleTranscripts,
+  templatedCoaching,
   templatedProfile,
   WORD_ANALYSIS_UNLOCK_WORDS,
 } from "../lib/insights/compute";
@@ -133,7 +134,7 @@ export const generateVoiceProfile = async (opts?: {
   try {
     if (liteMode) {
       // Lite mode skips the LLM entirely to stay light on weak hardware.
-      profile = templatedProfile(base);
+      profile = templatedProfile(base, words);
     } else {
       const input = {
         system: buildProfileSystemPrompt(),
@@ -160,13 +161,18 @@ export const generateVoiceProfile = async (opts?: {
         if (!gen.repo) throw new Error("no generation model configured");
         text = (await gen.repo.generateText(input)).text;
       }
-      profile = parseProfileResponse(text) ?? templatedProfile(base);
+      profile = parseProfileResponse(text) ?? templatedProfile(base, words);
+      // If the model omitted coaching, backfill a grounded offline version so the
+      // Coaching card is never empty when we have enough signal.
+      if (!profile.coaching) {
+        profile = { ...profile, coaching: templatedCoaching(words) };
+      }
     }
   } catch (error) {
     getLogger().warning(
       `Voice profile generation fell back to template: ${error}`,
     );
-    profile = templatedProfile(base);
+    profile = templatedProfile(base, words);
   }
 
   const stored: StoredVoiceProfile = {
@@ -188,6 +194,63 @@ export const generateVoiceProfile = async (opts?: {
     history.sort((a, b) => a.milestone - b.milestone);
     draft.local.voiceProfiles = history;
   });
+};
+
+export type TranscriptReview = {
+  critique: string;
+  rewrite: string;
+};
+
+// One-shot "Review this" for a single transcript: sends it to the big model and
+// gets back honest coaching plus a cleaner rewrite. Falls back to the user's
+// configured model, and degrades gracefully to raw text if JSON isn't returned.
+export const reviewTranscript = async (
+  transcript: string,
+): Promise<TranscriptReview> => {
+  const state = getAppState();
+  const text = transcript.trim();
+  if (!text) throw new Error("empty transcript");
+
+  const system =
+    "You are a warm, sharp writing and speaking coach. Given one thing the user dictated by voice, give brief honest feedback and a cleaner rewrite. Respond with ONLY a JSON object, no prose or markdown.";
+  const prompt = `Here is something the user dictated by voice:
+
+"""
+${text.slice(0, 4000)}
+"""
+
+Return a JSON object with exactly these keys:
+{
+  "critique": "2-4 sentences of specific, kind, actionable feedback on clarity, structure, filler words, and tone",
+  "rewrite": "a cleaner, tighter version that keeps their voice and meaning, in the same language as the original"
+}`;
+  const input = { system, prompt };
+  const ollamaUrl =
+    getMyUserPreferences(state)?.postProcessingOllamaUrl ?? DEFAULT_OLLAMA_URL;
+
+  let raw: string;
+  try {
+    const deep = new OllamaGenerateTextRepo(ollamaUrl, PROFILE_MODEL);
+    raw = (await deep.generateText(input)).text;
+  } catch (deepError) {
+    getLogger().warning(`Review model unavailable: ${deepError}`);
+    const gen = getGenerateTextRepo();
+    if (!gen.repo) throw new Error("no generation model configured");
+    raw = (await gen.repo.generateText(input)).text;
+  }
+
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (match) {
+    try {
+      const p = JSON.parse(match[0]) as Record<string, unknown>;
+      const critique = typeof p.critique === "string" ? p.critique.trim() : "";
+      const rewrite = typeof p.rewrite === "string" ? p.rewrite.trim() : "";
+      if (critique || rewrite) return { critique, rewrite };
+    } catch {
+      // fall through to raw degrade
+    }
+  }
+  return { critique: raw.trim(), rewrite: "" };
 };
 
 export type RecordDictationEventInput = {

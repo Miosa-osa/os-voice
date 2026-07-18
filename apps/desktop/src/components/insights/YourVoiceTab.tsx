@@ -42,6 +42,44 @@ const ChipRow = ({ items }: { items: string[] }) =>
     </Stack>
   );
 
+const CoachingGroup = ({
+  color,
+  label,
+  items,
+}: {
+  color: string;
+  label: React.ReactNode;
+  items: string[];
+}) => (
+  <Box>
+    <Typography
+      variant="overline"
+      sx={{ color, display: "block", fontWeight: 700 }}
+    >
+      {label}
+    </Typography>
+    <Stack spacing={0.75} sx={{ mt: 0.5 }}>
+      {items.map((item, i) => (
+        <Stack key={i} direction="row" spacing={1} alignItems="flex-start">
+          <Box
+            sx={{
+              mt: "7px",
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              bgcolor: color,
+              flexShrink: 0,
+            }}
+          />
+          <Typography variant="body2" color="textSecondary">
+            {item}
+          </Typography>
+        </Stack>
+      ))}
+    </Stack>
+  </Box>
+);
+
 const ProfileRow = ({
   label,
   value,
@@ -374,6 +412,42 @@ export const YourVoiceTab = () => {
           totalWords={totalWords}
         />
       )}
+
+      {aiProfile?.coaching &&
+        (aiProfile.coaching.strengths.length > 0 ||
+          aiProfile.coaching.growthAreas.length > 0 ||
+          aiProfile.coaching.suggestions.length > 0) && (
+          <Section
+            title={<FormattedMessage defaultMessage="Coaching" />}
+            description={
+              <FormattedMessage defaultMessage="An honest, grounded read on how you speak — what's working and what to try next." />
+            }
+          >
+            <Stack spacing={2}>
+              {aiProfile.coaching.strengths.length > 0 && (
+                <CoachingGroup
+                  color="success.main"
+                  label={<FormattedMessage defaultMessage="What you do well" />}
+                  items={aiProfile.coaching.strengths}
+                />
+              )}
+              {aiProfile.coaching.growthAreas.length > 0 && (
+                <CoachingGroup
+                  color="warning.main"
+                  label={<FormattedMessage defaultMessage="Where to grow" />}
+                  items={aiProfile.coaching.growthAreas}
+                />
+              )}
+              {aiProfile.coaching.suggestions.length > 0 && (
+                <CoachingGroup
+                  color="primary.main"
+                  label={<FormattedMessage defaultMessage="Try this next" />}
+                  items={aiProfile.coaching.suggestions}
+                />
+              )}
+            </Stack>
+          </Section>
+        )}
 
       {totalWords >= SIGNATURE_UNLOCK_WORDS ? (
         <Section title={<FormattedMessage defaultMessage="Signature" />}>

@@ -667,15 +667,80 @@ export const computeLeaderboard = (
   return { records, topApps };
 };
 
-export const templatedProfile = (base: VoiceProfile): AiVoiceProfile => ({
+export const templatedProfile = (
+  base: VoiceProfile,
+  words?: WordAnalysis,
+): AiVoiceProfile => ({
   name: base.name,
   identity: base.description,
   traits: [],
   topics: [],
   style: "",
   quirks: [],
+  coaching: words ? templatedCoaching(words) : undefined,
   generated: false,
 });
+
+// A grounded, offline coaching fallback derived purely from the measured stats,
+// so the Coaching card still says something honest and specific when the LLM is
+// unavailable. Every line is anchored to a real number.
+export const templatedCoaching = (
+  words: WordAnalysis,
+): AiVoiceProfile["coaching"] => {
+  const strengths: string[] = [];
+  const growthAreas: string[] = [];
+  const suggestions: string[] = [];
+
+  if (words.fillerRate <= 3) {
+    strengths.push(
+      `Low filler rate — about ${words.fillerRate} filler words per 100, so you sound deliberate.`,
+    );
+  } else if (words.fillerRate >= 6) {
+    growthAreas.push(
+      `Filler words are frequent (~${words.fillerRate} per 100). Trimming "um", "like" and "basically" would sharpen you up.`,
+    );
+    suggestions.push(
+      "Pause silently instead of filling gaps — a beat of quiet reads as confidence.",
+    );
+  }
+
+  if (words.avgSentenceLength >= 6 && words.avgSentenceLength <= 20) {
+    strengths.push(
+      `Well-balanced sentences (~${words.avgSentenceLength} words) that are easy to follow.`,
+    );
+  } else if (words.avgSentenceLength > 24) {
+    growthAreas.push(
+      `Sentences run long (~${words.avgSentenceLength} words on average), which can bury your point.`,
+    );
+    suggestions.push(
+      "Break long thoughts into two shorter sentences — say the point, then the reason.",
+    );
+  } else if (words.avgSentenceLength > 0 && words.avgSentenceLength < 6) {
+    growthAreas.push(
+      `Sentences are very short (~${words.avgSentenceLength} words) — adding a little connective tissue can help them flow.`,
+    );
+  }
+
+  if (words.vocabularySize >= 400) {
+    strengths.push(
+      `Rich vocabulary — ${words.vocabularySize} distinct words across your dictations.`,
+    );
+  }
+
+  if (words.questionRatio >= 30) {
+    growthAreas.push(
+      `A lot of what you say is phrased as questions (${words.questionRatio}%). Stating things directly can land with more authority.`,
+    );
+  }
+
+  if (suggestions.length === 0) {
+    suggestions.push(
+      "Keep going — re-run this after more dictation for a sharper read on your speaking.",
+    );
+  }
+
+  return { strengths, growthAreas, suggestions };
+};
 
 export const sampleTranscripts = (
   transcriptions: Transcription[],

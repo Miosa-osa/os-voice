@@ -56,7 +56,12 @@ Be deep and specific — this should feel like it genuinely *gets* them. Return 
   "ubiquitousLanguage": ["6-12 of their CHARACTERISTIC recurring words/phrases/terms — the vocabulary they live in — pulled verbatim from the samples"],
   "recentActivity": "one sentence starting 'Lately you've been...' summarizing their most recent dictations",
   "tone": "1-3 words for their tone/energy (e.g. assertive, measured, enthusiastic)",
-  "whatsChanged": "one short sentence on what's shifted since the previous profile, or '' if none/unknown"
+  "whatsChanged": "one short sentence on what's shifted since the previous profile, or '' if none/unknown",
+  "coaching": {
+    "strengths": ["2-4 concrete things they do WELL when they speak — ground each in the stats/samples (e.g. low filler rate of ${words.fillerRate}/100, tight ${words.avgSentenceLength}-word sentences, clear structure)"],
+    "growthAreas": ["2-4 specific, kind, actionable things to improve — ground each in the actual numbers (high filler rate, run-on sentences, rambling, too many/few questions at ${words.questionRatio}%)"],
+    "suggestions": ["2-4 short practical tips they could try on their next dictation to speak more clearly"]
+  }
 }`;
 };
 
@@ -72,6 +77,22 @@ export const parseProfileResponse = (text: string): AiVoiceProfile | null => {
       Array.isArray(v) ? v.map((x) => String(x)).filter(Boolean) : [];
     const str = (v: unknown): string | undefined =>
       typeof v === "string" && v.trim() ? v.trim() : undefined;
+    const coachingRaw =
+      p.coaching && typeof p.coaching === "object"
+        ? (p.coaching as Record<string, unknown>)
+        : null;
+    const coaching = coachingRaw
+      ? {
+          strengths: arr(coachingRaw.strengths),
+          growthAreas: arr(coachingRaw.growthAreas),
+          suggestions: arr(coachingRaw.suggestions),
+        }
+      : undefined;
+    const hasCoaching =
+      coaching &&
+      (coaching.strengths.length > 0 ||
+        coaching.growthAreas.length > 0 ||
+        coaching.suggestions.length > 0);
     return {
       name: p.name,
       identity: p.identity,
@@ -87,6 +108,7 @@ export const parseProfileResponse = (text: string): AiVoiceProfile | null => {
       recentActivity: str(p.recentActivity),
       tone: str(p.tone),
       whatsChanged: str(p.whatsChanged),
+      coaching: hasCoaching ? coaching : undefined,
       generated: true,
     };
   } catch {

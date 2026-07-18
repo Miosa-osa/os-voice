@@ -14,7 +14,15 @@ export type AiVoiceProfile = {
   expertise?: string[];
   howYouSpeak?: string;
   ubiquitousLanguage?: string[];
+  // Coaching layer: turns the profile from a mirror into a coach.
+  coaching?: Coaching;
   generated: boolean;
+};
+
+export type Coaching = {
+  strengths: string[];
+  growthAreas: string[];
+  suggestions: string[];
 };
 
 export type StoredVoiceProfile = {

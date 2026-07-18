@@ -353,12 +353,35 @@ const sentencesOf = (text: string): string[] => text.split(/[.!?\n]+/);
 
 export type LearnVocabOptions = { excluded?: Set<string>; max?: number };
 
-type Entry = { display: string; count: number; weight: number };
+// A learned word with the evidence behind it: how many times it was heard and a
+// real sentence it showed up in (used as an example in the dictionary UI).
+export type LearnedVocabItem = {
+  word: string;
+  count: number;
+  example: string;
+};
+
+type Entry = {
+  display: string;
+  count: number;
+  weight: number;
+  example: string;
+};
+
+const cleanExample = (sentence: string): string => {
+  const trimmed = sentence.trim().replace(/\s+/g, " ");
+  return trimmed.length > 160 ? `${trimmed.slice(0, 157)}…` : trimmed;
+};
 
 export const learnVocabulary = (
   transcripts: string[],
   opts: LearnVocabOptions = {},
-): string[] => {
+): string[] => learnVocabularyDetailed(transcripts, opts).map((e) => e.word);
+
+export const learnVocabularyDetailed = (
+  transcripts: string[],
+  opts: LearnVocabOptions = {},
+): LearnedVocabItem[] => {
   const max = opts.max ?? 60;
   const excluded = new Set(
     Array.from(opts.excluded ?? []).map((word) => word.toLowerCase()),
@@ -406,6 +429,7 @@ export const learnVocabulary = (
     if (!text) continue;
     for (const sentence of sentencesOf(text)) {
       const tokens = sentence.match(TOKEN_RE) ?? [];
+      const example = cleanExample(sentence);
       let prev: string | null = null;
 
       for (const token of tokens) {
@@ -419,8 +443,9 @@ export const learnVocabulary = (
               existing.weight = weight;
               existing.display = token;
             }
+            if (!existing.example && example) existing.example = example;
           } else {
-            unigrams.set(key, { display: token, count: 1, weight });
+            unigrams.set(key, { display: token, count: 1, weight, example });
           }
 
           if (prev && /^[A-Z]/.test(prev) && /^[A-Z]/.test(token)) {
@@ -428,7 +453,13 @@ export const learnVocabulary = (
             const bkey = phrase.toLowerCase();
             const bexisting = bigrams.get(bkey);
             if (bexisting) bexisting.count += 1;
-            else bigrams.set(bkey, { display: phrase, count: 1, weight: 4 });
+            else
+              bigrams.set(bkey, {
+                display: phrase,
+                count: 1,
+                weight: 4,
+                example,
+              });
           }
           prev = token;
         } else {
@@ -449,13 +480,17 @@ export const learnVocabulary = (
   );
   candidates.sort((a, b) => score(b) - score(a) || b.count - a.count);
 
-  const result: string[] = [];
+  const result: LearnedVocabItem[] = [];
   const seen = new Set<string>();
   for (const entry of candidates) {
     const key = entry.display.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    result.push(entry.display);
+    result.push({
+      word: entry.display,
+      count: entry.count,
+      example: entry.example,
+    });
     if (result.length >= max) break;
   }
   return result;

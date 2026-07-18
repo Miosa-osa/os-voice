@@ -1,4 +1,5 @@
 import { StoredVoiceProfile } from "../lib/insights/profile.types";
+import { LearnedWord } from "./vocab.state";
 
 export type LocalState = {
   assistantModeEnabled: boolean;
@@ -14,6 +15,10 @@ export type LocalState = {
   optInToBetaUpdates: boolean;
   voiceProfiles?: StoredVoiceProfile[];
   liteMode?: boolean;
+  // Persistent intelligent dictionary: timestamped, categorized, defined words
+  // OS Voice has learned, plus the words the user has explicitly dismissed.
+  learnedVocab?: LearnedWord[];
+  dismissedVocab?: string[];
 };
 
 export const INITIAL_LOCAL_STATE: LocalState = {
