@@ -145,9 +145,9 @@ export const SignInForm = () => {
             onClick={handleClickLocalSetup}
             variant="text"
             endIcon={<ArrowForward />}
-            sx={{ color: "text.disabled", fontWeight: 400 }}
+            sx={{ color: "text.secondary", fontWeight: 500 }}
           >
-            <FormattedMessage defaultMessage="Local set up" />
+            <FormattedMessage defaultMessage="Continue without an account" />
           </Button>
         )
       }
@@ -195,11 +195,13 @@ export const SignInForm = () => {
         isOpen={confirmLocalSetupOpen}
         onCancel={handleCancelLocalSetup}
         onConfirm={handleConfirmLocalSetup}
-        title={<FormattedMessage defaultMessage="⚠️ Advanced Setup Required" />}
-        content={
-          <FormattedMessage defaultMessage="Local set up is complicated and requires a strong technical background. We recommend the free plan for most users." />
+        title={
+          <FormattedMessage defaultMessage="Use OS Voice without an account" />
         }
-        confirmLabel={<FormattedMessage defaultMessage="Accept" />}
+        content={
+          <FormattedMessage defaultMessage="OS Voice can run entirely on your device using local speech-to-text models — no account, sign-in, or internet connection required. Your data stays on this device. You can always sign in later from Settings if you want cloud sync or hosted models." />
+        }
+        confirmLabel={<FormattedMessage defaultMessage="Continue locally" />}
         cancelLabel={<FormattedMessage defaultMessage="Go back" />}
       />
     </OnboardingFormLayout>
