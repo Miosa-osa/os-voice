@@ -248,6 +248,11 @@ const LockedSection = ({
 // actions. Shown expanded and prominent above the timeline of past days.
 // Uses the plain flat card style — the gradient treatment is reserved for
 // the portrait only.
+// The model sometimes already wraps `notable` in quote marks; strip any
+// surrounding quotes so it never renders doubled (“ ”like this“ ”).
+const quoted = (s: string): string =>
+  `“${s.replace(/^[\s"'“”‘’]+|[\s"'“”‘’]+$/g, "")}”`;
+
 const TodaySnapshotCard = ({
   daily,
   loading,
@@ -330,7 +335,7 @@ const TodaySnapshotCard = ({
 
       {daily.notable && (
         <Typography variant="body2" color="textSecondary" fontStyle="italic">
-          {`“${daily.notable}”`}
+          {quoted(daily.notable)}
         </Typography>
       )}
 
@@ -367,20 +372,43 @@ const DailyTimelineItem = ({
       backgroundImage: "none",
     }}
   >
-    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-      <Stack sx={{ width: "100%", pr: 1 }} spacing={0.25}>
-        <Stack direction="row" justifyContent="space-between" spacing={2}>
-          <Typography fontWeight={600}>
+    <AccordionSummary
+      expandIcon={<ExpandMoreIcon />}
+      sx={{ "& .MuiAccordionSummary-content": { minWidth: 0 } }}
+    >
+      <Stack sx={{ width: "100%", minWidth: 0, pr: 1 }} spacing={0.25}>
+        <Stack
+          direction="row"
+          justifyContent="space-between"
+          spacing={2}
+          sx={{ minWidth: 0 }}
+        >
+          <Typography fontWeight={600} noWrap>
             {dayjs(daily.date).format("MMM D, YYYY")}
           </Typography>
           {daily.mood && (
-            <Typography variant="caption" color="textSecondary">
+            <Typography
+              variant="caption"
+              color="textSecondary"
+              noWrap
+              sx={{ minWidth: 0, flexShrink: 1 }}
+            >
               {daily.mood}
             </Typography>
           )}
         </Stack>
         {daily.summary && (
-          <Typography variant="body2" color="textSecondary" noWrap>
+          <Typography
+            variant="body2"
+            color="textSecondary"
+            sx={{
+              minWidth: 0,
+              display: "-webkit-box",
+              WebkitLineClamp: 1,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+          >
             {daily.summary}
           </Typography>
         )}
@@ -388,10 +416,13 @@ const DailyTimelineItem = ({
     </AccordionSummary>
     <AccordionDetails sx={{ color: "text.primary", px: 2, pt: 1, pb: 2 }}>
       <Stack spacing={1.5}>
+        {daily.summary && (
+          <Typography variant="body2">{daily.summary}</Typography>
+        )}
         {daily.focus.length > 0 && <ChipRow items={daily.focus} />}
         {daily.notable && (
           <Typography variant="body2" color="textSecondary" fontStyle="italic">
-            {`“${daily.notable}”`}
+            {quoted(daily.notable)}
           </Typography>
         )}
         {daily.howYouSpokeToday && (
