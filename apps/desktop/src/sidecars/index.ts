@@ -184,9 +184,35 @@ class LocalTranscriptionSidecarFacade {
     preferGpu: boolean;
     deviceId?: string;
   }): Promise<boolean> {
-    const useGpu = preferGpu && !this.gpuUnavailable;
-    const sidecar = useGpu ? this.gpuSidecar : this.cpuSidecar;
+    // Doubles as a GPU HEALTH PROBE. If the GPU is preferred but the warmup
+    // transcription fails in a device-fatal way (e.g. a broken/updated NVIDIA
+    // driver making the GPU sidecar abort), mark the GPU unavailable so real
+    // dictations go straight to CPU instead of crashing on every take. On a
+    // healthy machine the GPU warms and is used; after a reboot fixes the driver
+    // the next launch probes clean and GPU turbo comes back automatically — no
+    // manual switching. Runs per app launch, so it self-heals.
+    if (preferGpu && !this.gpuUnavailable) {
+      try {
+        return await this.warmSidecar(this.gpuSidecar, model, true, deviceId);
+      } catch (error) {
+        if (!this.shouldFallbackToCpu(error)) {
+          // Not a device failure (e.g. model missing) — don't disable the GPU.
+          throw error;
+        }
+        this.markGpuUnavailable(error);
+      }
+    }
 
+    // CPU warmup: either CPU-preferred, or the GPU probe just failed.
+    return await this.warmSidecar(this.cpuSidecar, model, false, undefined);
+  }
+
+  private async warmSidecar(
+    sidecar: LocalTranscriptionSidecar,
+    model: LocalWhisperModel,
+    useGpu: boolean,
+    deviceId?: string,
+  ): Promise<boolean> {
     // Eagerly start the sidecar process (spawn warm).
     await sidecar.ensureStarted();
 
@@ -227,11 +253,27 @@ class LocalTranscriptionSidecarFacade {
 
   private shouldFallbackToCpu(error: unknown): boolean {
     if (error instanceof SidecarRequestError) {
+      // No HTTP status = transport-level failure: the sidecar process is
+      // unreachable/dead (crashed). A real HTTP status is a request-level
+      // problem, not a device failure, so don't disable the GPU for it.
       return error.status === undefined;
     }
 
     const message = toErrorMessage(error).toLowerCase();
-    return message.includes("sidecar") || message.includes("request failed");
+    // Match a crashed/unreachable GPU sidecar (e.g. a broken NVIDIA driver makes
+    // whisper.cpp abort → the process dies → connect/send fails) as well as
+    // generic sidecar transport failures.
+    return (
+      message.includes("sidecar") ||
+      message.includes("request failed") ||
+      message.includes("error sending request") ||
+      message.includes("connection refused") ||
+      message.includes("econnrefused") ||
+      message.includes("connection reset") ||
+      message.includes(" exited") ||
+      message.includes("abort") ||
+      message.includes("foreign exception")
+    );
   }
 
   private markGpuUnavailable(error: unknown): void {
