@@ -3,8 +3,11 @@ export type DeviceCapability = {
   gpuName: string | null;
   cpuCores: number;
   ramGb: number;
-  // Total GPU VRAM in MB (NVIDIA-only, best-effort). null when unavailable.
+  // Total GPU VRAM in MB. NVIDIA: best-effort. Apple Silicon (unified memory):
+  // mirrors total system RAM. null when unavailable.
   vramTotalMb?: number | null;
+  // True when the GPU shares system RAM (Apple Silicon unified memory).
+  unifiedMemory?: boolean;
 };
 
 // A live snapshot of resource usage for the Speed & System diagnostics.
@@ -16,6 +19,8 @@ export type LiveSystemStats = {
   gpuUtilPct: number | null;
   vramUsedMb: number | null;
   vramTotalMb: number | null;
+  // True when the GPU shares system RAM (Apple Silicon unified memory).
+  unifiedMemory: boolean;
 };
 
 export type RecommendationTier =
