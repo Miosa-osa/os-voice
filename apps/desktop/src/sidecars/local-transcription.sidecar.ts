@@ -344,12 +344,48 @@ export class LocalTranscriptionSidecar extends BaseSidecar {
         });
     };
 
+    // Audio arrives from the recorder as many small frames. Uploading each frame
+    // as its own HTTP request serialises hundreds of round trips per dictation,
+    // which runs slower than real time — so a backlog builds up while you speak
+    // and finalize has to drain it before transcription can even start (measured
+    // at ~0.36x the spoken duration of pure dead air: 10.5s of waiting after a
+    // 29s dictation). Coalescing frames into the same batch size the batch path
+    // already uses bounds the number of round trips by seconds of audio rather
+    // than by frame count.
+    let pendingSamples = new Float32Array(0);
+
+    const appendPending = (samples: Float32Array): void => {
+      if (samples.length === 0) {
+        return;
+      }
+
+      const merged = new Float32Array(pendingSamples.length + samples.length);
+      merged.set(pendingSamples);
+      merged.set(samples, pendingSamples.length);
+      pendingSamples = merged;
+    };
+
+    const flushPending = (force: boolean): void => {
+      while (
+        pendingSamples.length >= SIDECAR_UPLOAD_CHUNK_SAMPLE_COUNT ||
+        (force && pendingSamples.length > 0)
+      ) {
+        const take = Math.min(
+          pendingSamples.length,
+          SIDECAR_UPLOAD_CHUNK_SAMPLE_COUNT,
+        );
+        queueChunkUpload(pendingSamples.slice(0, take));
+        pendingSamples = pendingSamples.slice(take);
+      }
+    };
+
     return {
       writeAudioChunk: (samples) => {
         if (released || finalizePromise) {
           return;
         }
-        queueChunkUpload(this.toFloat32Array(samples));
+        appendPending(this.toFloat32Array(samples));
+        flushPending(false);
       },
       finalize: async () => {
         if (finalizePromise) {
@@ -357,6 +393,9 @@ export class LocalTranscriptionSidecar extends BaseSidecar {
         }
 
         finalizePromise = (async () => {
+          // Push whatever is still buffered before waiting, or the tail of the
+          // recording (up to one batch) would never reach the sidecar.
+          flushPending(true);
           await queue;
           if (queuedError) {
             getLogger().warning(
