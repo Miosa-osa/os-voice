@@ -864,6 +864,14 @@ describe("computeTranscriptionPerformance", () => {
     expect(result.activeDevice).toBeNull();
     expect(result.activeModel).toBeNull();
     expect(result.speedTrend).toEqual([]);
+    expect(result.medianTranscribeMs).toBe(0);
+    expect(result.slowestTranscribeMs).toBe(0);
+    expect(result.p95TranscribeMs).toBe(0);
+    expect(result.totalDictationsTimed).toBe(0);
+    expect(result.totalAudioSecondsProcessed).toBe(0);
+    expect(result.totalProcessingSeconds).toBe(0);
+    expect(result.timeSavedSeconds).toBe(0);
+    expect(result.byDevice).toEqual([]);
   });
 
   it("ignores rows missing audio duration or transcription duration", () => {
@@ -942,5 +950,80 @@ describe("computeTranscriptionPerformance", () => {
 
     expect(result.wordsPerSecond).toBe(10);
     expect(result.avgPostprocessMs).toBe(1000);
+  });
+
+  it("computes median, slowest, and p95 transcription duration", () => {
+    const durationsMs = [1000, 2000, 3000, 4000, 5000];
+    const transcriptions = durationsMs.map((ms, i) =>
+      buildTranscription({
+        createdAt: dayjs()
+          .subtract(durationsMs.length - i, "day")
+          .toISOString(),
+        audio: { filePath: `f${i}`, durationMs: 10000 },
+        transcriptionDurationMs: ms,
+      }),
+    );
+
+    const result = computeTranscriptionPerformance(transcriptions, []);
+
+    expect(result.sampleSize).toBe(5);
+    expect(result.medianTranscribeMs).toBe(3000);
+    expect(result.slowestTranscribeMs).toBe(5000);
+    expect(result.p95TranscribeMs).toBe(5000);
+  });
+
+  it("sums total audio/processing seconds and computes time saved", () => {
+    const transcriptions = [
+      buildTranscription({
+        audio: { filePath: "a", durationMs: 10000 }, // 10s audio
+        transcriptionDurationMs: 2000, // 2s processing
+      }),
+      buildTranscription({
+        audio: { filePath: "b", durationMs: 20000 }, // 20s audio
+        transcriptionDurationMs: 4000, // 4s processing
+      }),
+    ];
+
+    const result = computeTranscriptionPerformance(transcriptions, []);
+
+    expect(result.totalDictationsTimed).toBe(2);
+    expect(result.totalAudioSecondsProcessed).toBe(30);
+    expect(result.totalProcessingSeconds).toBe(6);
+    expect(result.timeSavedSeconds).toBe(24);
+  });
+
+  it("breaks down usage by device+model, most-used first", () => {
+    const transcriptions = [
+      buildTranscription({
+        audio: { filePath: "a", durationMs: 10000 },
+        transcriptionDurationMs: 2000, // 5x
+        inferenceDevice: "gpu:0",
+        modelSize: "large-v3-turbo",
+      }),
+      buildTranscription({
+        audio: { filePath: "b", durationMs: 10000 },
+        transcriptionDurationMs: 2000, // 5x
+        inferenceDevice: "gpu:0",
+        modelSize: "large-v3-turbo",
+      }),
+      buildTranscription({
+        audio: { filePath: "c", durationMs: 10000 },
+        transcriptionDurationMs: 5000, // 2x
+        inferenceDevice: "cpu",
+        modelSize: "small",
+      }),
+    ];
+
+    const result = computeTranscriptionPerformance(transcriptions, []);
+
+    expect(result.byDevice).toEqual([
+      {
+        device: "GPU",
+        model: "large-v3-turbo",
+        count: 2,
+        avgRealtimeFactor: 5,
+      },
+      { device: "CPU", model: "small", count: 1, avgRealtimeFactor: 2 },
+    ]);
   });
 });

@@ -2305,6 +2305,38 @@ export type TranscriptionPerformance = {
   activeModel: string | null;
   /** Recent transcription-time trend (oldest to newest), for a MiniLine. */
   speedTrend: TrendPoint[];
+  /** Middle value of transcription durations, less skewed by outliers than the mean. */
+  medianTranscribeMs: number;
+  /** Slowest single transcription duration measured. */
+  slowestTranscribeMs: number;
+  /** 95th percentile transcription duration — worst-case-ish, excluding true outliers. */
+  p95TranscribeMs: number;
+  /** Same as sampleSize, exposed with a clearer name for display contexts. */
+  totalDictationsTimed: number;
+  /** Sum of audio duration (seconds) across every timed dictation. */
+  totalAudioSecondsProcessed: number;
+  /** Sum of transcription processing time (seconds) across every timed dictation. */
+  totalProcessingSeconds: number;
+  /** How much wall-clock time was saved vs. real-time playback (audio time − processing time). */
+  timeSavedSeconds: number;
+  /** Per device+model combination breakdown, most-used first. Empty when there's no timed data. */
+  byDevice: TranscriptionPerformanceBreakdown[];
+};
+
+export type TranscriptionPerformanceBreakdown = {
+  device: string | null;
+  model: string | null;
+  count: number;
+  avgRealtimeFactor: number;
+};
+
+const percentile = (sortedAsc: number[], p: number): number => {
+  if (sortedAsc.length === 0) return 0;
+  const index = Math.min(
+    sortedAsc.length - 1,
+    Math.ceil((p / 100) * sortedAsc.length) - 1,
+  );
+  return sortedAsc[Math.max(0, index)];
 };
 
 // Real, measured transcription speed + the active local device/model — no
@@ -2328,6 +2360,8 @@ export const computeTranscriptionPerformance = (
   let realtimeSum = 0;
   let transcribeMsSum = 0;
   let fastestTranscribeMs = Infinity;
+  let audioSecondsSum = 0;
+  let processingSecondsSum = 0;
   for (const t of timed) {
     const audioDurationMs = t.audio?.durationMs ?? 0;
     const transcriptionDurationMs = t.transcriptionDurationMs ?? 0;
@@ -2337,12 +2371,36 @@ export const computeTranscriptionPerformance = (
       fastestTranscribeMs,
       transcriptionDurationMs,
     );
+    audioSecondsSum += audioDurationMs / 1000;
+    processingSecondsSum += transcriptionDurationMs / 1000;
   }
 
   const realtimeFactor =
     sampleSize > 0 ? Math.round((realtimeSum / sampleSize) * 10) / 10 : 0;
   const avgTranscribeMs =
     sampleSize > 0 ? Math.round(transcribeMsSum / sampleSize) : 0;
+
+  const sortedDurationsMs = timed
+    .map((t) => t.transcriptionDurationMs ?? 0)
+    .sort((a, b) => a - b);
+  const medianTranscribeMs =
+    sampleSize > 0
+      ? sampleSize % 2 === 1
+        ? sortedDurationsMs[(sampleSize - 1) / 2]
+        : Math.round(
+            (sortedDurationsMs[sampleSize / 2 - 1] +
+              sortedDurationsMs[sampleSize / 2]) /
+              2,
+          )
+      : 0;
+  const slowestTranscribeMs =
+    sampleSize > 0 ? sortedDurationsMs[sampleSize - 1] : 0;
+  const p95TranscribeMs = percentile(sortedDurationsMs, 95);
+
+  const totalAudioSecondsProcessed = Math.round(audioSecondsSum);
+  const totalProcessingSeconds = Math.round(processingSecondsSum * 10) / 10;
+  const timeSavedSeconds =
+    Math.round((audioSecondsSum - processingSecondsSum) * 10) / 10;
 
   let wpsSum = 0;
   let wpsCount = 0;
@@ -2400,6 +2458,47 @@ export const computeTranscriptionPerformance = (
     }
   }
 
+  const breakdownByKey = new Map<
+    string,
+    {
+      device: string | null;
+      model: string | null;
+      count: number;
+      realtimeSum: number;
+    }
+  >();
+  for (const t of timed) {
+    const device = t.inferenceDevice ? deviceLabel(t.inferenceDevice) : null;
+    const model = t.modelSize ?? null;
+    const key = `${device ?? ""}::${model ?? ""}`;
+    const audioDurationMs = t.audio?.durationMs ?? 0;
+    const transcriptionDurationMs = t.transcriptionDurationMs ?? 0;
+    const existing = breakdownByKey.get(key);
+    if (existing) {
+      existing.count += 1;
+      existing.realtimeSum += audioDurationMs / transcriptionDurationMs;
+    } else {
+      breakdownByKey.set(key, {
+        device,
+        model,
+        count: 1,
+        realtimeSum: audioDurationMs / transcriptionDurationMs,
+      });
+    }
+  }
+  const byDevice: TranscriptionPerformanceBreakdown[] = Array.from(
+    breakdownByKey.values(),
+  )
+    .filter((entry) => entry.device || entry.model)
+    .map((entry) => ({
+      device: entry.device,
+      model: entry.model,
+      count: entry.count,
+      avgRealtimeFactor:
+        Math.round((entry.realtimeSum / entry.count) * 10) / 10,
+    }))
+    .sort((a, b) => b.count - a.count);
+
   return {
     sampleSize,
     realtimeFactor,
@@ -2410,6 +2509,14 @@ export const computeTranscriptionPerformance = (
     activeDevice,
     activeModel,
     speedTrend,
+    medianTranscribeMs,
+    slowestTranscribeMs,
+    p95TranscribeMs,
+    totalDictationsTimed: sampleSize,
+    totalAudioSecondsProcessed,
+    totalProcessingSeconds,
+    timeSavedSeconds,
+    byDevice,
   };
 };
 
