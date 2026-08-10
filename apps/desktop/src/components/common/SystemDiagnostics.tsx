@@ -87,11 +87,17 @@ export const SystemDiagnostics = ({
     };
   }, []);
 
+  // Apple Silicon has unified memory: the GPU shares system RAM, so there is no
+  // separate VRAM to show and no unprivileged GPU-utilization source.
+  const unifiedMemory = live?.unifiedMemory ?? hardware?.unifiedMemory ?? false;
+
   const onGpu = performance?.activeDevice === "GPU";
   const engineLabel = performance?.activeDevice
     ? intl.formatMessage(
         onGpu
-          ? { defaultMessage: "Running on your GPU (fast)" }
+          ? unifiedMemory
+            ? { defaultMessage: "Running on your Mac's GPU (fast)" }
+            : { defaultMessage: "Running on your GPU (fast)" }
           : { defaultMessage: "Running on your CPU" },
       )
     : null;
@@ -103,7 +109,10 @@ export const SystemDiagnostics = ({
   const vramTotalMb = live?.vramTotalMb ?? hardware?.vramTotalMb ?? null;
   const showGpuUtil =
     live?.gpuUtilPct !== null && live?.gpuUtilPct !== undefined;
+  // On unified-memory machines VRAM equals RAM, so the dedicated VRAM readouts
+  // are suppressed in favour of a single "Unified memory" bar below.
   const showVram =
+    !unifiedMemory &&
     live?.vramUsedMb !== null &&
     live?.vramUsedMb !== undefined &&
     vramTotalMb !== null;
@@ -159,13 +168,23 @@ export const SystemDiagnostics = ({
             {live && (
               <Stack spacing={0.25}>
                 <Typography variant="caption" color="text.secondary">
-                  <FormattedMessage
-                    defaultMessage="Memory (RAM) in use: {used} of {total} GB"
-                    values={{
-                      used: mbToGb(live.ramUsedMb),
-                      total: mbToGb(live.ramTotalMb),
-                    }}
-                  />
+                  {unifiedMemory ? (
+                    <FormattedMessage
+                      defaultMessage="Unified memory (shared with GPU): {used} of {total} GB"
+                      values={{
+                        used: mbToGb(live.ramUsedMb),
+                        total: mbToGb(live.ramTotalMb),
+                      }}
+                    />
+                  ) : (
+                    <FormattedMessage
+                      defaultMessage="Memory (RAM) in use: {used} of {total} GB"
+                      values={{
+                        used: mbToGb(live.ramUsedMb),
+                        total: mbToGb(live.ramTotalMb),
+                      }}
+                    />
+                  )}
                 </Typography>
                 <LinearProgress
                   variant="determinate"
@@ -196,7 +215,7 @@ export const SystemDiagnostics = ({
                 />
               </Stack>
             )}
-            {!live && vramTotalMb !== null && (
+            {!live && !unifiedMemory && vramTotalMb !== null && (
               <Typography variant="caption" color="text.secondary">
                 <FormattedMessage
                   defaultMessage="Video memory (VRAM) available: {total} GB"
@@ -256,7 +275,7 @@ export const SystemDiagnostics = ({
             }
           />
         )}
-        {!live && vramTotalMb !== null && (
+        {!live && !unifiedMemory && vramTotalMb !== null && (
           <StatCard
             size="compact"
             label={<FormattedMessage defaultMessage="Video memory (VRAM)" />}
@@ -297,7 +316,11 @@ export const SystemDiagnostics = ({
           <Stack spacing={0.5}>
             <Stack direction="row" justifyContent="space-between">
               <Typography variant="caption" color="text.secondary">
-                <FormattedMessage defaultMessage="Memory (RAM) in use" />
+                {unifiedMemory ? (
+                  <FormattedMessage defaultMessage="Unified memory (shared with GPU)" />
+                ) : (
+                  <FormattedMessage defaultMessage="Memory (RAM) in use" />
+                )}
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 <FormattedMessage
