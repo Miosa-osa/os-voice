@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
-import { Card, LinearProgress, Stack, Typography } from "@mui/material";
-import { FormattedMessage } from "react-intl";
+import {
+  Card,
+  LinearProgress,
+  Stack,
+  Tooltip,
+  Typography,
+} from "@mui/material";
+import { FormattedMessage, useIntl } from "react-intl";
 import {
   getDeviceCapability,
   getLiveSystemStats,
@@ -34,10 +40,13 @@ export type SystemDiagnosticsProps = {
 // Every number here is either polled straight from the OS/GPU driver or
 // measured from real timing data — nothing is estimated or invented. GPU and
 // VRAM fields are simply omitted when the machine has no usable NVIDIA GPU.
+// Labels are written in plain English (no "VRAM"/"p95"-style jargon) so a
+// non-technical person can understand what's happening at a glance.
 export const SystemDiagnostics = ({
   performance,
   compact = false,
 }: SystemDiagnosticsProps) => {
+  const intl = useIntl();
   const [hardware, setHardware] = useState<DeviceCapability | null>(null);
   const [live, setLive] = useState<LiveSystemStats | null>(null);
 
@@ -78,10 +87,17 @@ export const SystemDiagnostics = ({
     };
   }, []);
 
-  const activeDeviceModel =
-    performance?.activeDevice && performance?.activeModel
-      ? `${performance.activeDevice} · ${performance.activeModel}`
-      : (performance?.activeDevice ?? performance?.activeModel ?? null);
+  const onGpu = performance?.activeDevice === "GPU";
+  const engineLabel = performance?.activeDevice
+    ? intl.formatMessage(
+        onGpu
+          ? { defaultMessage: "Running on your GPU (fast)" }
+          : { defaultMessage: "Running on your CPU" },
+      )
+    : null;
+  const engineValue = performance?.activeModel
+    ? `${engineLabel ?? ""}${engineLabel && performance.activeModel ? " · " : ""}${performance.activeModel}`
+    : engineLabel;
 
   const gpuName = live?.gpuName ?? hardware?.gpuName ?? null;
   const vramTotalMb = live?.vramTotalMb ?? hardware?.vramTotalMb ?? null;
@@ -101,29 +117,39 @@ export const SystemDiagnostics = ({
           </Typography>
 
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            {(activeDeviceModel || gpuName) && (
+            {(engineValue || gpuName) && (
               <StatCard
                 size="compact"
-                label={<FormattedMessage defaultMessage="Engine" />}
-                value={activeDeviceModel ?? gpuName ?? "—"}
+                label={<FormattedMessage defaultMessage="How it's running" />}
+                value={engineValue ?? gpuName ?? "—"}
               />
+            )}
+            {performance && performance.sampleSize > 0 && (
+              <Tooltip
+                title={intl.formatMessage(
+                  {
+                    defaultMessage:
+                      "For every second of processing, it handles about {factor} seconds of your speech.",
+                  },
+                  { factor: performance.realtimeFactor.toFixed(1) },
+                )}
+              >
+                <StatCard
+                  size="compact"
+                  label={<FormattedMessage defaultMessage="Speed" />}
+                  value={
+                    <FormattedMessage
+                      defaultMessage="{factor}x real-time"
+                      values={{ factor: performance.realtimeFactor.toFixed(1) }}
+                    />
+                  }
+                />
+              </Tooltip>
             )}
             {performance && performance.sampleSize > 0 && (
               <StatCard
                 size="compact"
-                label={<FormattedMessage defaultMessage="Real-time factor" />}
-                value={
-                  <FormattedMessage
-                    defaultMessage="{factor}x"
-                    values={{ factor: performance.realtimeFactor }}
-                  />
-                }
-              />
-            )}
-            {performance && performance.sampleSize > 0 && (
-              <StatCard
-                size="compact"
-                label={<FormattedMessage defaultMessage="Avg transcribe" />}
+                label={<FormattedMessage defaultMessage="Typical wait" />}
                 value={formatSeconds(performance.avgTranscribeMs)}
               />
             )}
@@ -134,7 +160,7 @@ export const SystemDiagnostics = ({
               <Stack spacing={0.25}>
                 <Typography variant="caption" color="text.secondary">
                   <FormattedMessage
-                    defaultMessage="RAM: {used} of {total} GB"
+                    defaultMessage="Memory (RAM) in use: {used} of {total} GB"
                     values={{
                       used: mbToGb(live.ramUsedMb),
                       total: mbToGb(live.ramTotalMb),
@@ -154,7 +180,7 @@ export const SystemDiagnostics = ({
               <Stack spacing={0.25}>
                 <Typography variant="caption" color="text.secondary">
                   <FormattedMessage
-                    defaultMessage="VRAM: {used} of {total} GB"
+                    defaultMessage="Video memory (VRAM) in use: {used} of {total} GB"
                     values={{
                       used: mbToGb(live!.vramUsedMb!),
                       total: mbToGb(vramTotalMb!),
@@ -173,7 +199,7 @@ export const SystemDiagnostics = ({
             {!live && vramTotalMb !== null && (
               <Typography variant="caption" color="text.secondary">
                 <FormattedMessage
-                  defaultMessage="VRAM: {total} GB total"
+                  defaultMessage="Video memory (VRAM) available: {total} GB"
                   values={{ total: mbToGb(vramTotalMb) }}
                 />
               </Typography>
@@ -187,35 +213,41 @@ export const SystemDiagnostics = ({
   return (
     <Stack spacing={1.5}>
       <Typography variant="body2" color="textSecondary">
-        <FormattedMessage defaultMessage="System" />
+        <FormattedMessage defaultMessage="Your computer" />
       </Typography>
 
       <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
-        {activeDeviceModel && (
+        {engineValue && (
           <StatCard
             size="compact"
-            label={<FormattedMessage defaultMessage="Active device" />}
-            value={activeDeviceModel}
+            label={<FormattedMessage defaultMessage="How it's running" />}
+            value={engineValue}
+            hint={
+              <FormattedMessage defaultMessage="The hardware and model currently doing the transcribing." />
+            }
           />
         )}
         {gpuName && (
           <StatCard
             size="compact"
-            label={<FormattedMessage defaultMessage="GPU" />}
+            label={<FormattedMessage defaultMessage="Graphics card" />}
             value={gpuName}
           />
         )}
         {hardware && (
           <StatCard
             size="compact"
-            label={<FormattedMessage defaultMessage="CPU cores" />}
+            label={<FormattedMessage defaultMessage="Processor cores" />}
             value={hardware.cpuCores}
+            hint={
+              <FormattedMessage defaultMessage="More cores generally means more work can happen at once." />
+            }
           />
         )}
         {hardware && (
           <StatCard
             size="compact"
-            label={<FormattedMessage defaultMessage="RAM" />}
+            label={<FormattedMessage defaultMessage="Memory (RAM)" />}
             value={
               <FormattedMessage
                 defaultMessage="{ram} GB"
@@ -227,12 +259,15 @@ export const SystemDiagnostics = ({
         {!live && vramTotalMb !== null && (
           <StatCard
             size="compact"
-            label={<FormattedMessage defaultMessage="VRAM" />}
+            label={<FormattedMessage defaultMessage="Video memory (VRAM)" />}
             value={
               <FormattedMessage
                 defaultMessage="{vram} GB"
                 values={{ vram: mbToGb(vramTotalMb) }}
               />
+            }
+            hint={
+              <FormattedMessage defaultMessage="Memory on your graphics card, used when transcribing on the GPU." />
             }
           />
         )}
@@ -241,13 +276,13 @@ export const SystemDiagnostics = ({
       {live ? (
         <Stack spacing={1.25}>
           <Typography variant="caption" color="text.secondary">
-            <FormattedMessage defaultMessage="Live resource usage" />
+            <FormattedMessage defaultMessage="What your computer is doing right now" />
           </Typography>
 
           <Stack spacing={0.5}>
             <Stack direction="row" justifyContent="space-between">
               <Typography variant="caption" color="text.secondary">
-                <FormattedMessage defaultMessage="CPU load" />
+                <FormattedMessage defaultMessage="Processor load" />
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 {`${Math.round(live.cpuLoadPct)}%`}
@@ -262,7 +297,7 @@ export const SystemDiagnostics = ({
           <Stack spacing={0.5}>
             <Stack direction="row" justifyContent="space-between">
               <Typography variant="caption" color="text.secondary">
-                <FormattedMessage defaultMessage="RAM" />
+                <FormattedMessage defaultMessage="Memory (RAM) in use" />
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 <FormattedMessage
@@ -287,7 +322,7 @@ export const SystemDiagnostics = ({
             <Stack spacing={0.5}>
               <Stack direction="row" justifyContent="space-between">
                 <Typography variant="caption" color="text.secondary">
-                  <FormattedMessage defaultMessage="GPU utilization" />
+                  <FormattedMessage defaultMessage="GPU in use" />
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
                   {`${Math.round(live.gpuUtilPct!)}%`}
@@ -304,7 +339,7 @@ export const SystemDiagnostics = ({
             <Stack spacing={0.5}>
               <Stack direction="row" justifyContent="space-between">
                 <Typography variant="caption" color="text.secondary">
-                  <FormattedMessage defaultMessage="VRAM" />
+                  <FormattedMessage defaultMessage="Video memory (VRAM) in use" />
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
                   <FormattedMessage
