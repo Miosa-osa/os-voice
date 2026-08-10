@@ -21,6 +21,16 @@ use crate::config::SidecarConfig;
 use crate::state::AppState;
 
 pub async fn run_server(mode: ComputeMode) -> Result<(), String> {
+    // Pull whisper.cpp's and GGML's own logging off stdout/stderr. Left alone they
+    // emit a line per decoded token plus thousands of Metal kernel lines, all of
+    // which the desktop app forwards across the Rust->JS bridge and renders as
+    // warnings — measured at 559 log lines for a single dictation, right inside the
+    // latency-critical window. whisper-rs is built here without its
+    // `log_backend`/`tracing_backend` features, so installing the hooks routes
+    // those messages nowhere rather than to the console. Safe to call repeatedly;
+    // only the first call takes effect.
+    whisper_rs::install_logging_hooks();
+
     let config = SidecarConfig::from_env(mode)?;
 
     tokio::fs::create_dir_all(&config.models_dir)
