@@ -11,6 +11,7 @@ import {
   DualPaneLayout,
   OnboardingFormLayout,
 } from "./OnboardingCommon";
+import { SystemSummaryCard } from "./SystemSummaryCard";
 
 export const ChooseTranscriptionForm = () => {
   const { mode, selectedApiKeyId } = useAppStore(
@@ -47,6 +48,8 @@ export const ChooseTranscriptionForm = () => {
             <FormattedMessage defaultMessage="Decide how OS Voice should process your recordings. Locally or through an API." />
           </Typography>
         </Box>
+
+        <SystemSummaryCard />
 
         <AITranscriptionConfiguration hideCloudOption={true} />
       </Stack>

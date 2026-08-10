@@ -11,6 +11,7 @@ import {
   computeMomentum,
   computeRhythm,
   computeSessionStats,
+  computeTranscriptionPerformance,
   computeTrends,
   computeUsage,
   computeWeekComparison,
@@ -844,5 +845,102 @@ describe("templatedProfile", () => {
     expect(profile.personality).toContain("Inquisitive");
     expect(profile.coaching?.strengths.length).toBeGreaterThan(0);
     expect(profile.topics).toContain("Database");
+  });
+});
+
+describe("computeTranscriptionPerformance", () => {
+  it("returns a zeroed-out result when there is no timed data", () => {
+    const result = computeTranscriptionPerformance(
+      [buildTranscription()],
+      [buildEvent()],
+    );
+
+    expect(result.sampleSize).toBe(0);
+    expect(result.realtimeFactor).toBe(0);
+    expect(result.wordsPerSecond).toBe(0);
+    expect(result.avgTranscribeMs).toBe(0);
+    expect(result.fastestTranscribeMs).toBe(0);
+    expect(result.avgPostprocessMs).toBeNull();
+    expect(result.activeDevice).toBeNull();
+    expect(result.activeModel).toBeNull();
+    expect(result.speedTrend).toEqual([]);
+  });
+
+  it("ignores rows missing audio duration or transcription duration", () => {
+    const transcriptions = [
+      buildTranscription({
+        audio: { filePath: "a", durationMs: 10000 },
+        transcriptionDurationMs: null,
+      }),
+      buildTranscription({
+        audio: undefined,
+        transcriptionDurationMs: 2000,
+      }),
+      buildTranscription({
+        audio: { filePath: "b", durationMs: 10000 },
+        transcriptionDurationMs: 2000,
+        inferenceDevice: "gpu:0",
+        modelSize: "large-v3-turbo",
+      }),
+    ];
+
+    const result = computeTranscriptionPerformance(transcriptions, []);
+
+    expect(result.sampleSize).toBe(1);
+    expect(result.realtimeFactor).toBe(5);
+    expect(result.avgTranscribeMs).toBe(2000);
+    expect(result.fastestTranscribeMs).toBe(2000);
+    expect(result.activeDevice).toBe("GPU");
+    expect(result.activeModel).toBe("large-v3-turbo");
+  });
+
+  it("averages realtime factor and picks the fastest run", () => {
+    const transcriptions = [
+      buildTranscription({
+        createdAt: dayjs().subtract(2, "day").toISOString(),
+        audio: { filePath: "a", durationMs: 10000 }, // 10s audio
+        transcriptionDurationMs: 2000, // 5x real-time
+        inferenceDevice: "cpu",
+        modelSize: "small",
+      }),
+      buildTranscription({
+        createdAt: dayjs().subtract(1, "day").toISOString(),
+        audio: { filePath: "b", durationMs: 10000 }, // 10s audio
+        transcriptionDurationMs: 1000, // 10x real-time, fastest
+        inferenceDevice: "cpu",
+        modelSize: "small",
+      }),
+    ];
+
+    const result = computeTranscriptionPerformance(transcriptions, []);
+
+    expect(result.sampleSize).toBe(2);
+    expect(result.realtimeFactor).toBe(7.5);
+    expect(result.avgTranscribeMs).toBe(1500);
+    expect(result.fastestTranscribeMs).toBe(1000);
+    expect(result.activeDevice).toBe("CPU");
+    expect(result.activeModel).toBe("small");
+    expect(result.speedTrend.length).toBe(2);
+  });
+
+  it("derives words-per-second and post-processing time from events, ignoring untimed ones", () => {
+    const events = [
+      buildEvent({ wordCount: 20, transcriptionDurationMs: 2000 }), // 10 wps
+      buildEvent({ wordCount: 30, transcriptionDurationMs: 3000 }), // 10 wps
+      buildEvent({ wordCount: 10, transcriptionDurationMs: null }), // ignored
+      buildEvent({ postprocessDurationMs: 500 }),
+      buildEvent({ postprocessDurationMs: 1500 }),
+    ];
+    const transcriptions = [
+      buildTranscription({
+        audio: { filePath: "a", durationMs: 10000 },
+        transcriptionDurationMs: 5000,
+      }),
+    ];
+
+    const result = computeTranscriptionPerformance(transcriptions, events);
+
+    expect(result.wordsPerSecond).toBe(10);
+    expect(result.avgPostprocessMs).toBe(1000);
   });
 });

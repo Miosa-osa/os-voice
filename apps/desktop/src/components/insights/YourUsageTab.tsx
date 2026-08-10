@@ -22,6 +22,7 @@ import {
   computePredictions,
   computeRhythm,
   computeSessionStats,
+  computeTranscriptionPerformance,
   computeTrends,
   computeUsage,
   computeUsageExtras,
@@ -32,6 +33,7 @@ import { DailyActivity } from "./DailyActivity";
 import { InsightsEmpty } from "./InsightsEmpty";
 import { MiniBars } from "./MiniBars";
 import { MiniLine } from "./MiniLine";
+import { SpeedAndSystem } from "./SpeedAndSystem";
 import { StatCard } from "./StatCard";
 import { useInsightsSources } from "./useInsightsData";
 
@@ -102,6 +104,10 @@ export const YourUsageTab = () => {
     [events, transcriptions],
   );
   const trends = useMemo(() => computeTrends(transcriptions), [transcriptions]);
+  const transcriptionPerformance = useMemo(
+    () => computeTranscriptionPerformance(transcriptions, events),
+    [transcriptions, events],
+  );
   const predictions = useMemo(
     () => computePredictions(events, transcriptions),
     [events, transcriptions],
@@ -543,6 +549,15 @@ export const YourUsageTab = () => {
                   )}
                 </Stack>
               </Stack>
+            </Section>
+
+            <Section
+              title={<FormattedMessage defaultMessage="Speed & System" />}
+              description={
+                <FormattedMessage defaultMessage="How fast OS Voice transcribes on this machine, measured from your real dictations." />
+              }
+            >
+              <SpeedAndSystem performance={transcriptionPerformance} />
             </Section>
 
             <Section

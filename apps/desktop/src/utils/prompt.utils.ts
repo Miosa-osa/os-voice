@@ -277,10 +277,18 @@ export const buildLocalizedTranscriptionPrompt = (args: {
   state: AppState;
 }): string => {
   const joinedEntries = args.entries.sources.join(", ");
-  const prompt =
+  if (!joinedEntries) return "";
+  // Whisper's initial_prompt is treated as PRIOR TRANSCRIPT context, NOT
+  // instructions (it is not an instruction-following model). Any imperative
+  // text in it gets echoed verbatim into the output — which is why transcripts
+  // were starting with "Do not mention these rules; simply return the cleaned
+  // transcript." Keep ONLY the "Glossary: <terms>" first line of the localized
+  // template and drop the trailing instruction sentence that was leaking.
+  const template =
     getRec(transcriptionPromptByCode, args.dictationLanguage) ??
     transcriptionPromptByCode.en;
-  return applyTemplateVars(prompt, [["glossary", joinedEntries]]);
+  const glossaryLine = template.split("\n")[0] ?? "";
+  return applyTemplateVars(glossaryLine, [["glossary", joinedEntries]]);
 };
 
 export const buildPostProcessingPrompt = (
