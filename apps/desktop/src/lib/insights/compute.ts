@@ -2279,6 +2279,140 @@ export const computeEfficiency = (
   };
 };
 
+// Human-readable label for the raw inference device string ("gpu:0" -> "GPU",
+// "cpu" -> "CPU"). Returns null rather than guessing for anything unrecognized.
+const deviceLabel = (device: string): string | null => {
+  const lower = device.toLowerCase();
+  if (lower.startsWith("gpu")) return "GPU";
+  if (lower === "cpu") return "CPU";
+  return null;
+};
+
+export type TranscriptionPerformance = {
+  /** How many transcriptions had real audio+processing timing to measure. */
+  sampleSize: number;
+  /** Average of (audio duration / transcription duration) — "Nx real-time". */
+  realtimeFactor: number;
+  /** Average words transcribed per second of processing time (from events). */
+  wordsPerSecond: number;
+  avgTranscribeMs: number;
+  fastestTranscribeMs: number;
+  /** Average post-processing (AI polish) time in ms, when any is recorded. */
+  avgPostprocessMs: number | null;
+  /** Human label for the most recently used device, e.g. "GPU". */
+  activeDevice: string | null;
+  /** Most recently used model size/name, e.g. "large-v3-turbo". */
+  activeModel: string | null;
+  /** Recent transcription-time trend (oldest to newest), for a MiniLine. */
+  speedTrend: TrendPoint[];
+};
+
+// Real, measured transcription speed + the active local device/model — no
+// fabricated numbers. Rows without both a real audio duration and a real
+// transcription duration (common on older data) are excluded entirely.
+export const computeTranscriptionPerformance = (
+  transcriptions: Transcription[],
+  events: LocalDictationEvent[],
+): TranscriptionPerformance => {
+  const timed = activeTranscriptions(transcriptions)
+    .filter(
+      (t) =>
+        (t.audio?.durationMs ?? 0) > 0 && (t.transcriptionDurationMs ?? 0) > 0,
+    )
+    .sort(
+      (a, b) => dayjs(a.createdAt).valueOf() - dayjs(b.createdAt).valueOf(),
+    );
+
+  const sampleSize = timed.length;
+
+  let realtimeSum = 0;
+  let transcribeMsSum = 0;
+  let fastestTranscribeMs = Infinity;
+  for (const t of timed) {
+    const audioDurationMs = t.audio?.durationMs ?? 0;
+    const transcriptionDurationMs = t.transcriptionDurationMs ?? 0;
+    realtimeSum += audioDurationMs / transcriptionDurationMs;
+    transcribeMsSum += transcriptionDurationMs;
+    fastestTranscribeMs = Math.min(
+      fastestTranscribeMs,
+      transcriptionDurationMs,
+    );
+  }
+
+  const realtimeFactor =
+    sampleSize > 0 ? Math.round((realtimeSum / sampleSize) * 10) / 10 : 0;
+  const avgTranscribeMs =
+    sampleSize > 0 ? Math.round(transcribeMsSum / sampleSize) : 0;
+
+  let wpsSum = 0;
+  let wpsCount = 0;
+  for (const e of events) {
+    if (
+      e.wordCount > 0 &&
+      e.transcriptionDurationMs &&
+      e.transcriptionDurationMs > 0
+    ) {
+      wpsSum += e.wordCount / (e.transcriptionDurationMs / 1000);
+      wpsCount += 1;
+    }
+  }
+  const wordsPerSecond =
+    wpsCount > 0 ? Math.round((wpsSum / wpsCount) * 10) / 10 : 0;
+
+  let postprocessSum = 0;
+  let postprocessCount = 0;
+  for (const e of events) {
+    if (e.postprocessDurationMs && e.postprocessDurationMs > 0) {
+      postprocessSum += e.postprocessDurationMs;
+      postprocessCount += 1;
+    }
+  }
+  const avgPostprocessMs =
+    postprocessCount > 0 ? Math.round(postprocessSum / postprocessCount) : null;
+
+  let activeDevice: string | null = null;
+  let activeModel: string | null = null;
+  for (let i = timed.length - 1; i >= 0; i -= 1) {
+    const t = timed[i];
+    if (!activeDevice && t.inferenceDevice) {
+      activeDevice = deviceLabel(t.inferenceDevice);
+    }
+    if (!activeModel && t.modelSize) {
+      activeModel = t.modelSize;
+    }
+    if (activeDevice && activeModel) break;
+  }
+
+  const BUCKETS = 8;
+  const speedTrend: TrendPoint[] = [];
+  if (sampleSize >= 2) {
+    const bucketCount = Math.min(BUCKETS, sampleSize);
+    const bucketSize = Math.ceil(sampleSize / bucketCount);
+    for (let i = 0; i < sampleSize; i += bucketSize) {
+      const chunk = timed.slice(i, i + bucketSize);
+      const avgMs =
+        chunk.reduce((sum, t) => sum + (t.transcriptionDurationMs ?? 0), 0) /
+        chunk.length;
+      speedTrend.push({
+        label: dayjs(chunk[0].createdAt).format("MMM D"),
+        value: Math.round(avgMs),
+      });
+    }
+  }
+
+  return {
+    sampleSize,
+    realtimeFactor,
+    wordsPerSecond,
+    avgTranscribeMs,
+    fastestTranscribeMs: sampleSize > 0 ? fastestTranscribeMs : 0,
+    avgPostprocessMs,
+    activeDevice,
+    activeModel,
+    speedTrend,
+  };
+};
+
 export const AVG_EMAIL_WORDS = 150;
 export const AVG_TWEET_WORDS = 20;
 export const AVG_PAGE_WORDS = 250;
