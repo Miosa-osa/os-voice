@@ -12,7 +12,7 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FormattedMessage, useIntl, type IntlShape } from "react-intl";
 import {
   refreshLocalTranscriptionDevices,
@@ -47,11 +47,14 @@ import {
   type LocalWhisperModel,
   normalizeLocalWhisperModel,
 } from "../../utils/local-transcription.utils";
+import { computeTranscriptionPerformance } from "../../lib/insights/compute";
 import { ManagedByOrgNotice } from "../common/ManagedByOrgNotice";
 import {
   SegmentedControl,
   SegmentedControlOption,
 } from "../common/SegmentedControl";
+import { SystemDiagnostics } from "../common/SystemDiagnostics";
+import { useInsightsSources } from "../insights/useInsightsData";
 import { maybeArrayElements } from "./AIPostProcessingConfiguration";
 import { ApiKeyList } from "./ApiKeyList";
 import { VoquillCloudSetting } from "./VoquillCloudSetting";
@@ -198,6 +201,14 @@ export const AITranscriptionConfiguration = ({
   const effectiveMode = useAppStore(getEffectiveTranscriptionMode);
   const allowChange = useAppStore(getAllowsChangeTranscription);
   const localTranscriptionConfig = transcription.localModelManagement;
+
+  // Real, measured speed data (when any exists locally) for the compact
+  // "Your system & performance" diagnostics card below.
+  const { events, transcriptions } = useInsightsSources();
+  const transcriptionPerformance = useMemo(
+    () => computeTranscriptionPerformance(transcriptions, events),
+    [transcriptions, events],
+  );
 
   const hasSelectedDevice = transcription.availableDevices.some(
     (device) => device.id === transcription.device,
@@ -711,6 +722,8 @@ export const AITranscriptionConfiguration = ({
       )}
 
       {effectiveMode === "cloud" && <VoquillCloudSetting />}
+
+      <SystemDiagnostics compact performance={transcriptionPerformance} />
     </Stack>
   );
 };

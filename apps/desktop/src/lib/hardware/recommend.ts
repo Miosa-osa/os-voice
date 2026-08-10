@@ -3,6 +3,19 @@ export type DeviceCapability = {
   gpuName: string | null;
   cpuCores: number;
   ramGb: number;
+  // Total GPU VRAM in MB (NVIDIA-only, best-effort). null when unavailable.
+  vramTotalMb?: number | null;
+};
+
+// A live snapshot of resource usage for the Speed & System diagnostics.
+export type LiveSystemStats = {
+  cpuLoadPct: number;
+  ramUsedMb: number;
+  ramTotalMb: number;
+  gpuName: string | null;
+  gpuUtilPct: number | null;
+  vramUsedMb: number | null;
+  vramTotalMb: number | null;
 };
 
 export type RecommendationTier =

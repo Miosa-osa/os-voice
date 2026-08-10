@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getAppState, produceAppState } from "../store";
 import {
   DeviceCapability,
+  LiveSystemStats,
   TranscriptionRecommendation,
   liteModelFor,
   recommendTranscription,
@@ -14,6 +15,11 @@ import { setSelectedToneId, updateUserPreferences } from "./user.actions";
 
 export const getDeviceCapability = (): Promise<DeviceCapability> =>
   invoke<DeviceCapability>("get_device_capability");
+
+// Live resource snapshot (CPU load, RAM used, GPU util + VRAM) for the Speed &
+// System diagnostics. Poll on an interval to show a live view.
+export const getLiveSystemStats = (): Promise<LiveSystemStats> =>
+  invoke<LiveSystemStats>("get_live_system_stats");
 
 export const detectAndRecommend = async (): Promise<{
   cap: DeviceCapability;
