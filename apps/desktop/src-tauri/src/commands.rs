@@ -1777,6 +1777,64 @@ pub fn copy_to_clipboard(text: String) -> Result<(), String> {
         .map_err(|e| format!("failed to set clipboard: {e}"))
 }
 
+/// Decide whether a posted paste keystroke actually landed, by comparing the
+/// focused field's text before and after.
+///
+/// Posting a synthetic Cmd+V always "succeeds" — the event goes to the window
+/// server regardless of whether the target does anything with it. This is the
+/// observation step that turns that into a real answer.
+///
+/// Only an observed no-op counts as failure. When the field's text is unreadable
+/// the target simply doesn't expose it to accessibility (terminals such as
+/// WezTerm render their own buffer, as do canvas and GPU-drawn editors), so
+/// absence of evidence is not evidence of failure — the transcript is left on the
+/// clipboard as a safety net for exactly those targets.
+fn paste_landed(before: Option<&str>, after: Option<&str>) -> bool {
+    match (before, after) {
+        // Both readable: an unchanged value is direct proof the paste did nothing.
+        (Some(before), Some(after)) => before != after,
+        // Anything unreadable: unobservable, so don't invent a failure.
+        _ => true,
+    }
+}
+
+#[cfg(test)]
+mod paste_landed_tests {
+    use super::paste_landed;
+
+    #[test]
+    fn reports_landed_when_field_text_changed() {
+        assert!(paste_landed(Some("hello"), Some("hello world")));
+    }
+
+    #[test]
+    fn reports_not_landed_when_field_text_unchanged() {
+        // The regression: a target that ignores synthetic Cmd+V leaves the field
+        // untouched, so we must not claim the transcript was pasted.
+        assert!(!paste_landed(Some("hello"), Some("hello")));
+    }
+
+    #[test]
+    fn empty_field_that_gained_text_counts_as_landed() {
+        assert!(paste_landed(Some(""), Some("dictated text")));
+    }
+
+    #[test]
+    fn unverifiable_target_is_treated_as_pasted() {
+        // Terminals and canvas editors expose no AX text either side of the paste.
+        // Absence of evidence must not be reported as failure — that was what
+        // surfaced "copied to clipboard" for a paste into WezTerm that had in fact
+        // landed.
+        assert!(paste_landed(None, None));
+    }
+
+    #[test]
+    fn readability_change_counts_as_landed() {
+        assert!(paste_landed(None, Some("now readable")));
+        assert!(paste_landed(Some("was readable"), None));
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn paste(
@@ -1784,11 +1842,15 @@ pub async fn paste(
     keybind: Option<String>,
     skip_clipboard_restore: Option<bool>,
 ) -> Result<PasteOutcome, String> {
-    // Probe the focused target first. If it clearly can't accept text, write
-    // the transcript to the clipboard and skip the paste keystroke entirely —
-    // that avoids the race where paste's delayed clipboard-restore overwrites
-    // the transcript we just put there. A short timeout keeps paste latency
-    // bounded if the accessibility probe stalls.
+    // Probe the focused target for confidence only — never as a veto. The probe
+    // is a heuristic (it recognises four AX roles, walks a bounded number of
+    // parents looking for a web area, and trusts AXSelectedText/AXValue
+    // settability), so it reports NotEditable for plenty of fields that paste
+    // perfectly well: Electron views, terminals, and native widgets that simply
+    // don't advertise settability. Refusing to paste on that guess is what made
+    // dictation silently degrade to "copied to clipboard". Always attempt the
+    // keystroke and report what actually happened instead. A short timeout keeps
+    // paste latency bounded if the accessibility probe stalls.
     let target = tokio::time::timeout(
         std::time::Duration::from_millis(500),
         tauri::async_runtime::spawn_blocking(
@@ -1800,31 +1862,19 @@ pub async fn paste(
     .and_then(|r| r.ok())
     .unwrap_or(PasteTargetState::Unknown);
 
-    if matches!(target, PasteTargetState::NotEditable) {
-        let copy_result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-            let mut clipboard =
-                arboard::Clipboard::new().map_err(|e| format!("clipboard unavailable: {e}"))?;
-            clipboard
-                .set_text(text)
-                .map_err(|e| format!("failed to set clipboard: {e}"))
-        })
-        .await;
+    // Only a confidently-editable target gets its clipboard restored afterwards.
+    // Otherwise the transcript stays on the clipboard as a safety net, which also
+    // removes the timer race where the delayed restore could overwrite it before
+    // the target consumed the pasteboard.
+    let confident_target = matches!(target, PasteTargetState::Editable);
+    let skip_clipboard_restore = skip_clipboard_restore.unwrap_or(!confident_target);
 
-        return match copy_result {
-            Ok(Ok(())) => Ok(PasteOutcome::CopiedToClipboard),
-            Ok(Err(err)) => {
-                log::error!("Copy-to-clipboard fallback failed: {err}");
-                Err(err)
-            }
-            Err(err) => {
-                let message = format!("Paste task join error: {err}");
-                log::error!("{message}");
-                Err(message)
-            }
-        };
-    }
-
-    let skip_clipboard_restore = skip_clipboard_restore.unwrap_or(false);
+    // Snapshot the focused field so we can tell whether the keystroke landed.
+    let text_before =
+        tauri::async_runtime::spawn_blocking(crate::platform::accessibility::get_text_field_info)
+            .await
+            .ok()
+            .and_then(|info| info.text_content);
     let join_result = tauri::async_runtime::spawn_blocking(move || {
         platform_paste_text(&text, keybind.as_deref(), skip_clipboard_restore)
     })
@@ -1834,9 +1884,65 @@ pub async fn paste(
         Ok(result) => {
             if let Err(err) = result.as_ref() {
                 log::error!("Paste failed: {err}");
+                return result.map(|()| PasteOutcome::Pasted);
             }
 
-            result.map(|()| PasteOutcome::Pasted)
+            // The keystroke was posted, but posting is not landing: a target that
+            // ignores synthetic Cmd+V leaves the field untouched. Re-read the
+            // focused field and only claim Pasted when its text actually changed.
+            // When we can't observe a change the transcript is still on the
+            // clipboard (skip_clipboard_restore above guarantees it for
+            // non-confident targets), so CopiedToClipboard is the honest answer.
+            // Posting a keystroke is asynchronous: the window server delivers it,
+            // then the target's event loop has to process it before its AX value
+            // reflects the paste. A single immediate read races that and reports a
+            // false no-op, so poll until the field changes. Returns as soon as a
+            // change is observed, so a healthy paste costs one interval, not the
+            // whole budget.
+            let baseline = text_before.clone();
+            let text_after = tauri::async_runtime::spawn_blocking(move || {
+                const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(60);
+                const MAX_WAIT: std::time::Duration = std::time::Duration::from_millis(900);
+
+                // If the field was unreadable before the paste it will stay
+                // unreadable after, so polling can only burn latency on exactly the
+                // targets that can never be verified (terminals, canvas editors).
+                // Read once and let paste_landed decide.
+                if baseline.is_none() {
+                    return crate::platform::accessibility::get_text_field_info().text_content;
+                }
+
+                let deadline = std::time::Instant::now() + MAX_WAIT;
+                loop {
+                    let current =
+                        crate::platform::accessibility::get_text_field_info().text_content;
+                    if current.as_deref() != baseline.as_deref() {
+                        return current;
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        return current;
+                    }
+                    std::thread::sleep(POLL_INTERVAL);
+                }
+            })
+            .await
+            .ok()
+            .flatten();
+
+            let landed = paste_landed(text_before.as_deref(), text_after.as_deref());
+
+            if !landed {
+                log::warn!(
+                    "Paste keystroke posted but focused field did not change (target={target:?}); \
+                     transcript left on clipboard"
+                );
+            }
+
+            Ok(if landed {
+                PasteOutcome::Pasted
+            } else {
+                PasteOutcome::CopiedToClipboard
+            })
         }
         Err(err) => {
             let message = format!("Paste task join error: {err}");
