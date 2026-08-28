@@ -9,6 +9,89 @@ use gtk::prelude::*;
 
 use crate::constants::MARGIN_BOTTOM;
 
+// In a Wayland session the pill runs through XWayland, where GNOME's dock
+// (a gnome-shell component) reserves no X11 struts, so _NET_WORKAREA does not
+// exclude it and a bottom-anchored window lands under the dock. Read the dock's
+// geometry from its gsettings instead. On a native X11 session struts work and
+// no extra offset is needed.
+struct DockReserve {
+    height: f64,
+    connector: String,
+    all_monitors: bool,
+}
+
+impl DockReserve {
+    fn applies_to(&self, monitor: &gdk::Monitor) -> bool {
+        if self.all_monitors {
+            return true;
+        }
+        if self.connector == "primary" {
+            return monitor.is_primary();
+        }
+        monitor
+            .model()
+            .map(|m| m == self.connector.as_str())
+            .unwrap_or(false)
+    }
+}
+
+// XWayland only receives pointer events while the cursor is over an X11
+// window, so XQueryPointer freezes whenever the cursor is over Wayland
+// surfaces and the pill stops following the mouse. The pointer-watch@osvoice
+// shell extension exposes gnome-shell's own pointer position over DBus;
+// prefer it and fall back to XQueryPointer when it is unavailable.
+fn pointer_watch_proxy() -> Option<gtk::gio::DBusProxy> {
+    use gtk::gio;
+    if std::env::var("WAYLAND_DISPLAY").is_err() {
+        return None;
+    }
+    gio::DBusProxy::for_bus_sync(
+        gio::BusType::Session,
+        gio::DBusProxyFlags::DO_NOT_LOAD_PROPERTIES
+            | gio::DBusProxyFlags::DO_NOT_CONNECT_SIGNALS,
+        None,
+        "org.gnome.Shell",
+        "/org/osvoice/PointerWatch",
+        "org.osvoice.PointerWatch",
+        None::<&gtk::gio::Cancellable>,
+    )
+    .ok()
+}
+
+fn detect_wayland_dock_reserve() -> Option<DockReserve> {
+    if std::env::var("WAYLAND_DISPLAY").is_err() {
+        return None;
+    }
+    let get = |key: &str| -> Option<String> {
+        let out = std::process::Command::new("gsettings")
+            .args(["get", "org.gnome.shell.extensions.dash-to-dock", key])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        Some(
+            String::from_utf8_lossy(&out.stdout)
+                .trim()
+                .trim_matches('\'')
+                .to_string(),
+        )
+    };
+    if get("dock-position")?.as_str() != "BOTTOM" {
+        return None;
+    }
+    let icon_size: f64 = get("dash-max-icon-size")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(48.0);
+    let connector = get("preferred-monitor-by-connector").unwrap_or_else(|| "primary".to_string());
+    let all_monitors = get("multi-monitor").as_deref() == Some("true");
+    Some(DockReserve {
+        height: icon_size + 28.0,
+        connector,
+        all_monitors,
+    })
+}
+
 pub(crate) fn setup_x11_window(window: &gtk::Window) {
     use std::ffi::{c_char, c_int, c_uchar, c_uint, c_ulong, c_void};
 
@@ -87,7 +170,22 @@ pub(crate) fn setup_x11_window(window: &gtk::Window) {
         XFlush(xdisplay);
     }
 
+    let pointer_proxy = pointer_watch_proxy();
     let cursor_pos = move || -> (c_int, c_int) {
+        if let Some(proxy) = &pointer_proxy {
+            let result = proxy.call_sync(
+                "GetPointer",
+                None,
+                gtk::gio::DBusCallFlags::NONE,
+                50,
+                None::<&gtk::gio::Cancellable>,
+            );
+            if let Ok(value) = result {
+                if let Some((x, y)) = value.get::<(i32, i32)>() {
+                    return (x, y);
+                }
+            }
+        }
         unsafe {
             let root = XDefaultRootWindow(xdisplay);
             let (mut rx, mut ry) = (0 as c_int, 0 as c_int);
@@ -103,6 +201,7 @@ pub(crate) fn setup_x11_window(window: &gtk::Window) {
     };
 
     let win_ref = window.clone();
+    let dock_reserve = detect_wayland_dock_reserve();
     let pill_pos_on_monitor =
         move |cx: c_int, cy: c_int, disp: &gdk::Display| -> Option<(c_int, c_int)> {
             let n = disp.n_monitors();
@@ -125,7 +224,11 @@ pub(crate) fn setup_x11_window(window: &gtk::Window) {
                     let (alloc_w, alloc_h) = win_ref.size();
                     let win_w = alloc_w as f64;
                     let win_h = alloc_h as f64;
-                    let margin = MARGIN_BOTTOM as f64 * scale;
+                    let dock = match &dock_reserve {
+                        Some(d) if d.applies_to(&monitor) => d.height,
+                        _ => 0.0,
+                    };
+                    let margin = (MARGIN_BOTTOM as f64 + dock) * scale;
                     return Some((
                         (wa_x + (wa_w - win_w) / 2.0) as c_int,
                         (wa_y + wa_h - win_h - margin) as c_int,
