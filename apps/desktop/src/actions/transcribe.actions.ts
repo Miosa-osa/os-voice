@@ -19,6 +19,7 @@ import {
   extractJsonFromMarkdown,
   unwrapNestedLlmResponse,
 } from "../utils/ai.utils";
+import { encodeAudioSamples } from "../utils/audio.utils";
 import { createId } from "../utils/id.utils";
 import {
   coerceToDictationLanguage,
@@ -322,21 +323,7 @@ export const storeTranscription = async (
   getLogger().verbose("Storing transcription record");
   const rate = input.audio.sampleRate;
 
-  const sampleCount = (() => {
-    const samples = input.audio.samples as unknown;
-    if (Array.isArray(samples)) {
-      return samples.length;
-    }
-
-    if (
-      samples &&
-      typeof (samples as { length?: number }).length === "number"
-    ) {
-      return (samples as { length: number }).length;
-    }
-
-    return 0;
-  })();
+  const sampleCount = input.audio.samples.length;
 
   if (rate == null || Number.isNaN(rate)) {
     getLogger().error("Received audio payload without sample rate");
@@ -371,11 +358,7 @@ export const storeTranscription = async (
     return { transcription: null, wordCount: wordsAdded };
   }
 
-  const payloadSamples = Array.isArray(input.audio.samples)
-    ? input.audio.samples
-    : Array.from(input.audio.samples ?? []);
-
-  if (rate <= 0 || payloadSamples.length === 0) {
+  if (rate <= 0 || sampleCount === 0) {
     return { transcription: null, wordCount: 0 };
   }
 
@@ -386,10 +369,12 @@ export const storeTranscription = async (
     try {
       audioSnapshot = await invoke<TranscriptionAudioSnapshot>(
         "store_transcription_audio",
+        encodeAudioSamples(input.audio.samples),
         {
-          id: transcriptionId,
-          samples: payloadSamples,
-          sampleRate: rate,
+          headers: {
+            "x-transcription-id": transcriptionId,
+            "x-sample-rate": String(rate),
+          },
         },
       );
     } catch (error) {

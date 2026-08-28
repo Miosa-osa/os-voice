@@ -17,11 +17,7 @@ import {
 import { getAppState } from "../store";
 import { DEFAULT_MODEL_SIZE, TranscriptionMode } from "../types/ai.types";
 import { AudioSamples } from "../types/audio.types";
-import {
-  buildWaveFile,
-  ensureFloat32Array,
-  normalizeSamples,
-} from "../utils/audio.utils";
+import { buildWaveFile, ensureFloat32Array } from "../utils/audio.utils";
 import { getEffectiveAuth } from "../utils/auth.utils";
 import { invokeEnterprise } from "../utils/enterprise.utils";
 import { getLocalTranscriptionSidecarManager } from "../sidecars";
@@ -107,8 +103,7 @@ export abstract class BaseTranscribeAudioRepo extends BaseRepo {
   async transcribeAudio(
     input: TranscribeAudioInput,
   ): Promise<TranscribeAudioOutput> {
-    const normalizedSamples = normalizeSamples(input.samples);
-    const floatSamples = ensureFloat32Array(normalizedSamples);
+    const floatSamples = ensureFloat32Array(input.samples);
 
     if (floatSamples.length === 0) {
       return { text: "", metadata: null };

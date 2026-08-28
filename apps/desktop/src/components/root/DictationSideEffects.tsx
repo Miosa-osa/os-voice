@@ -56,7 +56,11 @@ import {
   trackDictationStart,
 } from "../../utils/analytics.utils";
 import { getIsAssistantModeEnabled } from "../../utils/assistant-mode.utils";
-import { playAlertSound, tryPlayAudioChime } from "../../utils/audio.utils";
+import {
+  playAlertSound,
+  stopRecording as stopRecordingCommand,
+  tryPlayAudioChime,
+} from "../../utils/audio.utils";
 import {
   DEFAULT_DICTATION_LIMIT_MINUTES,
   getDictationRecordingTimerDurations,
@@ -292,7 +296,7 @@ export const DictationSideEffects = () => {
           getLogger().verbose("Invoking stop_recording and fetching a11y info");
           const [, outAudio, outA11yInfo, outAppTarget] = await Promise.all([
             strategyRef.current?.setPhase("loading"),
-            invoke<StopRecordingResponse>("stop_recording"),
+            stopRecordingCommand(),
             invoke<TextFieldInfo>("get_text_field_info").catch((error) => {
               getLogger().verbose(`Failed to get text field info: ${error}`);
               return null;

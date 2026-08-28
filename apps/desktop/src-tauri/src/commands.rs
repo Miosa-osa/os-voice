@@ -20,11 +20,25 @@ use sqlx::Row;
 
 use crate::platform::input::paste_text_into_focused_field as platform_paste_text;
 
-#[derive(serde::Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct StopRecordingResponse {
-    pub samples: Vec<f32>,
-    pub sample_rate: u32,
+// Audio crosses the IPC boundary as raw bytes rather than JSON number arrays:
+// a little-endian u32 sample rate followed by little-endian f32 samples.
+// JSON-encoding a long recording (tens of millions of samples) needed several
+// hundred megabytes per trip and crashed the webview.
+fn encode_audio_payload(samples: &[f32], sample_rate: u32) -> tauri::ipc::Response {
+    let mut bytes = Vec::with_capacity(4 + samples.len() * 4);
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    for sample in samples {
+        bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+    tauri::ipc::Response::new(bytes)
+}
+
+fn decode_audio_samples(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .filter(|sample| sample.is_finite())
+        .collect()
 }
 
 #[derive(serde::Serialize, specta::Type)]
@@ -355,13 +369,6 @@ pub struct UserPreferencesGetArgs {
 }
 
 const MAX_RETAINED_TRANSCRIPTION_AUDIO: usize = 20;
-
-#[derive(serde::Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct TranscriptionAudioData {
-    pub samples: Vec<f32>,
-    pub sample_rate: u32,
-}
 
 async fn delete_audio_entries(
     app: AppHandle,
@@ -933,12 +940,11 @@ pub async fn transcription_update(
 }
 
 #[tauri::command]
-#[specta::specta]
 pub async fn transcription_audio_load(
     app: AppHandle,
     id: String,
     database: State<'_, crate::state::OptionKeyDatabase>,
-) -> Result<TranscriptionAudioData, String> {
+) -> Result<tauri::ipc::Response, String> {
     let pool = database.pool();
 
     let audio_path: Option<String> = sqlx::query_scalar(
@@ -968,10 +974,7 @@ pub async fn transcription_audio_load(
     .await
     .map_err(|err| err.to_string())??;
 
-    Ok(TranscriptionAudioData {
-        samples,
-        sample_rate,
-    })
+    Ok(encode_audio_payload(&samples, sample_rate))
 }
 
 #[tauri::command]
@@ -1585,20 +1588,16 @@ pub async fn start_recording(
 }
 
 #[tauri::command]
-#[specta::specta]
 pub async fn stop_recording(
     _app: AppHandle,
     recorder: State<'_, Arc<dyn crate::platform::Recorder>>,
-) -> Result<StopRecordingResponse, String> {
+) -> Result<tauri::ipc::Response, String> {
     let recorder = Arc::clone(&recorder);
 
     tauri::async_runtime::spawn_blocking(move || match recorder.stop() {
         Ok(result) => {
             let audio = result.audio;
-            Ok(StopRecordingResponse {
-                samples: audio.samples,
-                sample_rate: audio.sample_rate,
-            })
+            Ok(encode_audio_payload(&audio.samples, audio.sample_rate))
         }
         Err(err) => {
             let not_recording = (*err)
@@ -1607,10 +1606,7 @@ pub async fn stop_recording(
                 .unwrap_or(false);
 
             if not_recording {
-                return Ok(StopRecordingResponse {
-                    samples: Vec::new(),
-                    sample_rate: 0,
-                });
+                return Ok(encode_audio_payload(&[], 0));
             }
 
             let message = err.to_string();
@@ -1623,23 +1619,30 @@ pub async fn stop_recording(
 }
 
 #[tauri::command]
-#[specta::specta]
 pub async fn store_transcription_audio(
     app: AppHandle,
-    id: String,
-    samples: Vec<f64>,
-    sample_rate: u32,
+    request: tauri::ipc::Request<'_>,
 ) -> Result<TranscriptionAudioSnapshot, String> {
+    let header = |name: &str| -> Result<String, String> {
+        request
+            .headers()
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string)
+            .ok_or_else(|| format!("Missing {name} header"))
+    };
+    let id = header("x-transcription-id")?;
+    let sample_rate: u32 = header("x-sample-rate")?
+        .parse()
+        .map_err(|_| "Invalid x-sample-rate header".to_string())?;
     if sample_rate == 0 {
         return Err("Audio sample rate must be greater than zero".to_string());
     }
 
-    let mut filtered = Vec::with_capacity(samples.len());
-    for sample in samples {
-        if sample.is_finite() {
-            filtered.push(sample as f32);
-        }
-    }
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("Expected raw audio bytes".to_string());
+    };
+    let filtered = decode_audio_samples(bytes);
 
     if filtered.is_empty() {
         return Err("No usable audio samples provided".to_string());

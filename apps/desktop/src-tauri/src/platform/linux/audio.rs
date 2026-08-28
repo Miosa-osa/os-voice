@@ -1,6 +1,6 @@
 use crate::domain::{RecordedAudio, RecordingMetrics, RecordingResult};
 use crate::errors::RecordingError;
-use crate::platform::audio::InputDeviceDescriptor;
+use crate::platform::audio::{InputDeviceDescriptor, TARGET_SAMPLE_RATE};
 use crate::platform::{ChunkCallback, LevelCallback, Recorder};
 use std::cmp;
 use std::sync::{Arc, Mutex};
@@ -10,7 +10,6 @@ use libpulse_binding as pulse;
 use libpulse_binding::mainloop::standard::Mainloop;
 use libpulse_simple_binding as psimple;
 
-const FALLBACK_SAMPLE_RATE: u32 = 44_100;
 const LEVEL_BIN_COUNT: usize = 12;
 const LEVEL_DISPATCH_INTERVAL: Duration = Duration::from_millis(48);
 const CHUNK_DISPATCH_INTERVAL: Duration = Duration::from_millis(100);
@@ -72,13 +71,6 @@ impl Recorder for PulseRecorder {
         // If the user picked a device by its display label, map it back
         // to the underlying PulseAudio source name.
         let source_name = resolve_source_name(preferred.as_deref());
-        let native_rate = query_source_native_rate(source_name.as_deref());
-
-        log::info!(
-            "PulseAudio native sample rate for source {:?}: {}",
-            source_name.as_deref().unwrap_or("default"),
-            native_rate,
-        );
 
         let stop_signal = Arc::new(Mutex::new(false));
         let stop_signal_clone = Arc::clone(&stop_signal);
@@ -88,7 +80,6 @@ impl Recorder for PulseRecorder {
             .spawn(move || {
                 record_loop(
                     source_name.as_deref(),
-                    native_rate,
                     stop_signal_clone,
                     level_callback,
                     chunk_callback,
@@ -99,7 +90,7 @@ impl Recorder for PulseRecorder {
         *guard = Some(ActiveRecording {
             stop_signal,
             thread: Some(thread),
-            sample_rate: native_rate,
+            sample_rate: TARGET_SAMPLE_RATE,
         });
 
         Ok(())
@@ -174,28 +165,10 @@ fn resolve_source_name(preferred_label: Option<&str>) -> Option<String> {
         .map(|s| s.name)
 }
 
-/// Query the native sample rate of a PulseAudio source. Falls back to the
-/// default source, then to `FALLBACK_SAMPLE_RATE` if enumeration fails.
-fn query_source_native_rate(source_name: Option<&str>) -> u32 {
-    let sources = enumerate_pulse_sources();
-
-    if let Some(name) = source_name {
-        if let Some(source) = sources.iter().find(|s| s.name == name) {
-            return source.sample_rate;
-        }
-    }
-
-    if let Some(source) = sources.iter().find(|s| s.is_default) {
-        return source.sample_rate;
-    }
-
-    FALLBACK_SAMPLE_RATE
-}
-
 /// The actual blocking recording loop. Runs on a dedicated thread.
+// PulseAudio resamples server-side to the requested rate.
 fn record_loop(
     source_name: Option<&str>,
-    sample_rate: u32,
     stop_signal: Arc<Mutex<bool>>,
     level_callback: Option<LevelCallback>,
     chunk_callback: Option<ChunkCallback>,
@@ -203,7 +176,7 @@ fn record_loop(
     let spec = pulse::sample::Spec {
         format: pulse::sample::Format::F32le,
         channels: 1,
-        rate: sample_rate,
+        rate: TARGET_SAMPLE_RATE,
     };
 
     let attr = pulse::def::BufferAttr {
@@ -305,7 +278,7 @@ fn record_loop(
     }
 
     let duration = if !all_samples.is_empty() {
-        Duration::from_secs_f64(all_samples.len() as f64 / f64::from(sample_rate))
+        Duration::from_secs_f64(all_samples.len() as f64 / f64::from(TARGET_SAMPLE_RATE))
     } else {
         start.elapsed()
     };
@@ -318,7 +291,7 @@ fn record_loop(
         },
         audio: RecordedAudio {
             samples: all_samples,
-            sample_rate,
+            sample_rate: TARGET_SAMPLE_RATE,
         },
     }
 }
@@ -331,7 +304,7 @@ fn empty_result() -> RecordingResult {
         },
         audio: RecordedAudio {
             samples: Vec::new(),
-            sample_rate: FALLBACK_SAMPLE_RATE,
+            sample_rate: TARGET_SAMPLE_RATE,
         },
     }
 }
@@ -368,7 +341,6 @@ struct PulseSource {
     description: String,
     is_monitor: bool,
     is_default: bool,
-    sample_rate: u32,
 }
 
 fn enumerate_pulse_sources() -> Vec<PulseSource> {
@@ -475,14 +447,12 @@ fn enumerate_pulse_sources() -> Vec<PulseSource> {
                 .unwrap_or_else(|| name.clone());
             let is_monitor = info.monitor_of_sink.is_some();
 
-            let sample_rate = info.sample_spec.rate;
             if let Ok(mut guard) = sources_clone.lock() {
                 guard.push(PulseSource {
                     is_default: name == default_name_clone,
                     name,
                     description,
                     is_monitor,
-                    sample_rate,
                 });
             }
         }

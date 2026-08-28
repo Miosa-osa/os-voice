@@ -32,11 +32,87 @@ pub fn list_input_devices() -> Vec<InputDeviceDescriptor> {
     }
 }
 
+pub const TARGET_SAMPLE_RATE: u32 = 16_000;
+
+// Linear-interpolating streaming resampler. Speech recognition runs at
+// 16 kHz, so capturing at the device rate (typically 48 kHz) only
+// triples the memory and IPC cost of every recording.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(crate) struct Resampler {
+    step: f64,
+    position: f64,
+    previous: f32,
+}
+
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+impl Resampler {
+    pub(crate) fn new(input_rate: u32, output_rate: u32) -> Self {
+        Self {
+            step: f64::from(input_rate) / f64::from(output_rate),
+            position: 0.0,
+            previous: 0.0,
+        }
+    }
+
+    pub(crate) fn process(&mut self, input: &[f32], output: &mut Vec<f32>) {
+        if input.is_empty() {
+            return;
+        }
+        if self.step == 1.0 {
+            output.extend_from_slice(input);
+            return;
+        }
+        let len = input.len();
+        let previous = self.previous;
+        let sample_at = |index: usize| if index == 0 { previous } else { input[index - 1] };
+        let mut position = self.position;
+        loop {
+            let index = position.floor() as usize;
+            if index >= len {
+                break;
+            }
+            let fraction = (position - index as f64) as f32;
+            let a = sample_at(index);
+            let b = sample_at(index + 1);
+            output.push(a + (b - a) * fraction);
+            position += self.step;
+        }
+        self.position = position - len as f64;
+        self.previous = input[len - 1];
+    }
+}
+
+
+#[cfg(test)]
+mod resampler_tests {
+    use super::{Resampler, TARGET_SAMPLE_RATE};
+
+    #[test]
+    fn downsamples_48k_to_16k_across_callbacks() {
+        let mut resampler = Resampler::new(48_000, TARGET_SAMPLE_RATE);
+        let mut output = Vec::new();
+        let input: Vec<f32> = (0..48_000).map(|i| (i % 100) as f32 / 100.0).collect();
+        for chunk in input.chunks(1_024) {
+            resampler.process(chunk, &mut output);
+        }
+        assert!((output.len() as i64 - 16_000).abs() <= 1, "got {}", output.len());
+        assert!(output.iter().all(|s| (0.0..=1.0).contains(s)));
+    }
+
+    #[test]
+    fn passes_through_matching_rate() {
+        let mut resampler = Resampler::new(16_000, TARGET_SAMPLE_RATE);
+        let mut output = Vec::new();
+        resampler.process(&[0.1, 0.2, 0.3], &mut output);
+        assert_eq!(output, vec![0.1, 0.2, 0.3]);
+    }
+}
+
 // ── CPAL backend (macOS, Windows) ──────────────────────────────────────
 
 #[cfg(not(target_os = "linux"))]
 mod cpal_impl {
-    use super::InputDeviceDescriptor;
+    use super::{InputDeviceDescriptor, Resampler, TARGET_SAMPLE_RATE};
     use crate::domain::{RecordedAudio, RecordingMetrics, RecordingResult};
     use crate::errors::RecordingError;
     use crate::platform::{ChunkCallback, LevelCallback, Recorder};
@@ -374,7 +450,7 @@ mod cpal_impl {
             let samples = recording
                 .buffer
                 .lock()
-                .map(|buffer| buffer.clone())
+                .map(|mut buffer| std::mem::take(&mut *buffer))
                 .unwrap_or_default();
             let sample_rate = recording.sample_rate;
             let fallback_duration = recording.start.elapsed();
@@ -583,7 +659,6 @@ mod cpal_impl {
 
         let sample_format = config.sample_format();
         let stream_config: StreamConfig = config.into();
-        let sample_rate = stream_config.sample_rate.0;
         let buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
 
         let stream = match sample_format {
@@ -621,7 +696,7 @@ mod cpal_impl {
             _stream: stream,
             start: Instant::now(),
             buffer,
-            sample_rate,
+            sample_rate: TARGET_SAMPLE_RATE,
             _level_emitter: level_emitter,
             _chunk_emitter: chunk_emitter,
         })
@@ -670,8 +745,7 @@ mod cpal_impl {
 
             let sample_format = config.sample_format();
             let stream_config: StreamConfig = config.into();
-            let sample_rate = stream_config.sample_rate.0;
-            let buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
+                let buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
 
             let stream_result = match sample_format {
                 SampleFormat::I16 => build_input_stream::<i16>(
@@ -737,7 +811,7 @@ mod cpal_impl {
                     _stream: stream,
                     start: Instant::now(),
                     buffer,
-                    sample_rate,
+                    sample_rate: TARGET_SAMPLE_RATE,
                     _level_emitter: level_emitter.clone(),
                     _chunk_emitter: chunk_emitter.clone(),
                 },
@@ -931,6 +1005,8 @@ mod cpal_impl {
         f32: cpal::FromSample<T>,
     {
         let channel_count = cmp::max(config.channels as usize, 1);
+        let mut resampler = Resampler::new(config.sample_rate.0, TARGET_SAMPLE_RATE);
+        let mut resampled = Vec::new();
         let callback_buffer = buffer.clone();
         let level_emitter_ref = level_emitter;
         let chunk_emitter_ref = chunk_emitter;
@@ -970,12 +1046,15 @@ mod cpal_impl {
                         level_emitter.emit(&mono_samples);
                     }
 
+                    resampled.clear();
+                    resampler.process(&mono_samples, &mut resampled);
+
                     if let Some(ref chunk_emitter) = chunk_emitter_ref {
-                        chunk_emitter.emit(&mono_samples);
+                        chunk_emitter.emit(&resampled);
                     }
 
                     if let Ok(mut shared_buffer) = callback_buffer.lock() {
-                        shared_buffer.extend_from_slice(&mono_samples);
+                        shared_buffer.extend_from_slice(&resampled);
                     }
                 },
                 |err| log::error!("stream error: {err}"),

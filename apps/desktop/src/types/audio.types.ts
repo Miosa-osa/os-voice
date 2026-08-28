@@ -1,1 +1,1 @@
-export type AudioSamples = number[] | Float32Array | null | undefined;
+export type AudioSamples = Float32Array | null | undefined;

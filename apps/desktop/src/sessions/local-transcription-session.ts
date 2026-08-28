@@ -151,9 +151,7 @@ export class LocalTranscriptionSession implements TranscriptionSession {
     audio: StopRecordingResponse,
     warnings: string[],
   ): Promise<TranscriptionSessionResult> {
-    const payloadSamples = Array.isArray(audio.samples)
-      ? audio.samples
-      : Array.from(audio.samples ?? []);
+    const payloadSamples = audio.samples;
     const rate = audio.sampleRate;
 
     if (rate == null || rate <= 0 || payloadSamples.length === 0) {
