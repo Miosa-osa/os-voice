@@ -276,15 +276,13 @@ async fn create_transcription_session(
 
     let session_id = state
         .transcription_sessions
-        .create(
-            crate::streaming_sessions::BufferedTranscriptionSessionInput {
-                model: request.model,
-                sample_rate: request.sample_rate,
-                language: request.language,
-                initial_prompt: request.initial_prompt,
-                device_id: request.device_id,
-            },
-        )
+        .create(crate::streaming_sessions::SessionConfig {
+            model: request.model,
+            sample_rate: request.sample_rate,
+            language: request.language,
+            initial_prompt: request.initial_prompt,
+            device_id: request.device_id,
+        })
         .await;
 
     Ok(Json(CreateTranscriptionSessionResponse { session_id }))
@@ -310,6 +308,32 @@ async fn append_transcription_session_chunk(
             )
         })?;
 
+    if let Some(segment) = state
+        .transcription_sessions
+        .take_ready_segment(session_id)
+        .await?
+    {
+        let task_state = state.clone();
+        let handle = tokio::spawn(async move {
+            let model_path = ensure_model_downloaded(&task_state, segment.config.model).await?;
+            run_transcription_request(
+                &task_state,
+                segment.config.model,
+                model_path,
+                segment.samples,
+                segment.config.sample_rate,
+                segment.config.language,
+                segment.prompt,
+                segment.config.device_id,
+            )
+            .await
+        });
+        state
+            .transcription_sessions
+            .set_in_flight(session_id, handle)
+            .await;
+    }
+
     Ok(Json(AppendTranscriptionChunkResponse {
         received_samples,
         buffered_samples,
@@ -321,7 +345,7 @@ async fn finalize_transcription_session(
     Path(path): Path<TranscriptionSessionPath>,
 ) -> Result<Json<TranscribeResponse>, ApiError> {
     let session_id = parse_session_id(&path.session_id)?;
-    let session = state
+    let mut session = state
         .transcription_sessions
         .take(session_id)
         .await
@@ -332,24 +356,37 @@ async fn finalize_transcription_session(
             )
         })?;
 
-    let model_path = ensure_model_downloaded(&state, session.model).await?;
     let started = Instant::now();
-    let output = run_transcription_request(
-        &state,
-        session.model,
-        model_path,
-        session.samples,
-        session.sample_rate,
-        session.language,
-        session.initial_prompt,
-        session.device_id,
-    )
-    .await?;
+    let mut text = session.committed.clone();
+    let mut inference_device = session.inference_device.clone();
+
+    if let Some(handle) = session.in_flight.take() {
+        let output = crate::streaming_sessions::join_segment(handle).await?;
+        crate::streaming_sessions::append_text(&mut text, &output.text);
+        inference_device = Some(output.inference_device);
+    }
+
+    if session.tail_is_worth_decoding() {
+        let model_path = ensure_model_downloaded(&state, session.config.model).await?;
+        let output = run_transcription_request(
+            &state,
+            session.config.model,
+            model_path,
+            std::mem::take(&mut session.tail),
+            session.config.sample_rate,
+            session.config.language.clone(),
+            session.tail_prompt(),
+            session.config.device_id.clone(),
+        )
+        .await?;
+        crate::streaming_sessions::append_text(&mut text, &output.text);
+        inference_device = Some(output.inference_device);
+    }
 
     Ok(Json(TranscribeResponse {
-        text: output.text,
-        model: session.model,
-        inference_device: output.inference_device,
+        text,
+        model: session.config.model,
+        inference_device: inference_device.unwrap_or_default(),
         duration_ms: started.elapsed().as_millis(),
     }))
 }
