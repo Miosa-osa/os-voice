@@ -1,0 +1,12 @@
+{
+  "uuid": "pointer-watch@osvoice",
+  "name": "OSVoice Pointer Watch",
+  "description": "Exposes the global pointer position over DBus so the OSVoice pill can follow the cursor on Wayland.",
+  "shell-version": [
+    "45",
+    "46",
+    "47",
+    "48"
+  ],
+  "url": ""
+}
