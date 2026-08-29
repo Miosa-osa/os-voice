@@ -84,6 +84,8 @@ pub enum InMessage {
         scale: f64,
         #[serde(default)]
         effect: String,
+        #[serde(default)]
+        preview: bool,
     },
     BroadcastTranscript { text: String },
     AssistantState {

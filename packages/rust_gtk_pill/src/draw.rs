@@ -119,7 +119,8 @@ fn draw_pill(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64) {
     cr.set_line_width(1.0);
     let _ = cr.stroke();
 
-    match state.phase.get() {
+    let phase = if state.is_previewing() { Phase::Recording } else { state.phase.get() };
+    match phase {
         Phase::Recording if expand_t > 0.1 => {
             match theme.wave_style {
                 WaveStyle::Classic => draw_waveform(cr, rx, ry, pill_w, pill_h, expand_t, state, &theme),

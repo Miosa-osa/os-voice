@@ -151,6 +151,8 @@ pub fn run(receiver: Receiver<InMessage>) {
         flash_action: RefCell::new(None),
         flash_action_label: RefCell::new(None),
         theme: RefCell::new(Theme::default()),
+        preview: Cell::new(false),
+        preview_clock: Cell::new(0.0),
         sparkle_active: Cell::new(false),
         sparkle_elapsed: Cell::new(0.0),
         fireworks_active: Cell::new(false),
@@ -341,9 +343,10 @@ pub fn run(receiver: Receiver<InMessage>) {
                         trigger_completion_effect(&state_tick);
                     }
                 }
-                InMessage::Theme { wave_style, accent_color, glow, scale, effect } => {
+                InMessage::Theme { wave_style, accent_color, glow, scale, effect, preview } => {
                     *state_tick.theme.borrow_mut() =
                         Theme::from_message(&wave_style, &accent_color, glow, scale, &effect);
+                    state_tick.preview.set(preview);
                 }
                 InMessage::Levels { levels } => {
                     *state_tick.pending_levels.borrow_mut() = levels;
@@ -517,11 +520,12 @@ pub fn run(receiver: Receiver<InMessage>) {
         }
 
         let visibility = state_tick.visibility.get();
-        let is_active = state_tick.phase.get() != Phase::Idle;
+        let previewing = state_tick.is_previewing();
+        let is_active = state_tick.phase.get() != Phase::Idle || previewing;
         let is_assistant = state_tick.assistant_active.get();
         let should_show = match backend_tick {
             Backend::LayerShell | Backend::PlainWayland => {
-                state_tick.phase.get() == Phase::Recording
+                state_tick.phase.get() == Phase::Recording || previewing
             }
             Backend::X11 => match visibility {
                 Visibility::Hidden => is_assistant,
@@ -618,13 +622,19 @@ fn tick(state: &PillState) {
     }
 
     let phase = state.phase.get();
-    let is_active = phase != Phase::Idle;
+    let previewing = state.is_previewing();
+    let is_active = phase != Phase::Idle || previewing;
     let is_recording = phase == Phase::Recording;
     let is_loading = phase == Phase::Loading;
     let hovered = state.hovered.get();
 
     // Audio levels
-    if is_recording {
+    if previewing {
+        let clock = state.preview_clock.get() + SPRING_DT;
+        state.preview_clock.set(clock);
+        let synthetic = 0.4 + 0.25 * (clock * 2.3).sin() + 0.15 * (clock * 7.1).sin();
+        state.target_level.set(synthetic.clamp(0.1, 1.0));
+    } else if is_recording {
         let levels = state.pending_levels.borrow();
         if !levels.is_empty() {
             let sum: f64 = levels.iter().map(|v| *v as f64).sum();

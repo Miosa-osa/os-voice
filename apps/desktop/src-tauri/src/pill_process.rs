@@ -134,12 +134,17 @@ pub fn notify_style_info(app: &tauri::AppHandle, count: u32, name: &str) {
 
 pub fn notify_theme(app: &tauri::AppHandle, theme: &serde_json::Value) {
     if let Some(pill) = app.try_state::<std::sync::Arc<PillProcess>>() {
-        let mut message = theme.clone();
-        if let Some(object) = message.as_object_mut() {
-            object.insert("type".to_string(), serde_json::Value::String("theme".to_string()));
-            if let Ok(json) = serde_json::to_string(&message) {
-                pill.send(&json);
-            }
+        let message = serde_json::json!({
+            "type": "theme",
+            "wave_style": theme.get("waveStyle").cloned().unwrap_or_default(),
+            "accent_color": theme.get("accentColor").cloned().unwrap_or_default(),
+            "glow": theme.get("glow").and_then(|v| v.as_bool()).unwrap_or(false),
+            "scale": theme.get("scale").and_then(|v| v.as_f64()).unwrap_or(1.0),
+            "effect": theme.get("effect").cloned().unwrap_or_default(),
+            "preview": theme.get("preview").and_then(|v| v.as_bool()).unwrap_or(false),
+        });
+        if let Ok(json) = serde_json::to_string(&message) {
+            pill.send(&json);
         }
     }
 }

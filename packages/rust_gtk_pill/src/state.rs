@@ -184,6 +184,8 @@ pub(crate) struct PillState {
 
     // Theme + completion sparkle
     pub(crate) theme: RefCell<Theme>,
+    pub(crate) preview: Cell<bool>,
+    pub(crate) preview_clock: Cell<f64>,
     pub(crate) sparkle_active: Cell<bool>,
     pub(crate) sparkle_elapsed: Cell<f64>,
 
@@ -203,6 +205,10 @@ pub(crate) struct PillState {
 }
 
 impl PillState {
+    pub(crate) fn is_previewing(&self) -> bool {
+        self.preview.get() && self.phase.get() == Phase::Idle && !self.assistant_active.get()
+    }
+
     pub(crate) fn content_offset(&self) -> (f64, f64) {
         let dw = self.draw_width.get();
         let dh = self.draw_height.get();

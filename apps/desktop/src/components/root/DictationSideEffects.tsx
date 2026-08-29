@@ -884,9 +884,14 @@ export const DictationSideEffects = () => {
   const pillTheme = useAppStore(
     (state) => state.userPrefs?.pillTheme ?? DEFAULT_PILL_THEME,
   );
+  const pillThemePreview = useAppStore(
+    (state) => state.settings.appearanceDialogOpen,
+  );
   useEffect(() => {
-    invoke("set_pill_theme", { theme: pillTheme }).catch(console.error);
-  }, [pillTheme]);
+    invoke("set_pill_theme", {
+      theme: { ...pillTheme, preview: pillThemePreview },
+    }).catch(console.error);
+  }, [pillTheme, pillThemePreview]);
 
   const pillHasContent = useAppStore((state) => {
     if (!state.pillConversationId) return false;
