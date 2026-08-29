@@ -24,7 +24,14 @@ fn prefer_x11_on_gnome_wayland() {
 
 fn main() {
     prefer_x11_on_gnome_wayland();
-    gtk::init().expect("Failed to initialize GTK");
+    // A stale XAUTHORITY (e.g. the app was launched from a shell that outlived
+    // the login session) makes the X11 backend unusable. Fall back to whatever
+    // GDK can open rather than exiting, so the pill still appears.
+    if gtk::init().is_err() {
+        eprintln!("[pill] X11 backend unavailable, falling back to the default backend");
+        std::env::remove_var("GDK_BACKEND");
+        gtk::init().expect("Failed to initialize GTK");
+    }
     let (sender, receiver) = std::sync::mpsc::channel();
     ipc::start_stdin_reader(sender);
     pill::run(receiver);
