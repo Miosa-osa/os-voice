@@ -11,7 +11,7 @@ use gtk_layer_shell::LayerShell;
 use crate::constants::*;
 use crate::ipc::{self, InMessage, OutMessage, Phase, Visibility};
 use crate::state::{FlameTongue, PillState, Rocket, RocketPhase, Spark, WindowMode};
-use crate::theme::{CompletionEffect, Theme};
+use crate::theme::{CompletionEffect, Theme, ThemeMessage};
 use crate::{draw, input, x11};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -343,9 +343,35 @@ pub fn run(receiver: Receiver<InMessage>) {
                         trigger_completion_effect(&state_tick);
                     }
                 }
-                InMessage::Theme { wave_style, accent_color, glow, scale, effect, preview } => {
-                    *state_tick.theme.borrow_mut() =
-                        Theme::from_message(&wave_style, &accent_color, glow, scale, &effect);
+                InMessage::Theme {
+                    wave_style,
+                    accent_color,
+                    accent_color_2,
+                    background_color,
+                    background_alpha,
+                    border_width,
+                    roundness,
+                    speed,
+                    intensity,
+                    glow,
+                    scale,
+                    effect,
+                    preview,
+                } => {
+                    *state_tick.theme.borrow_mut() = Theme::from_message(ThemeMessage {
+                        wave_style: &wave_style,
+                        accent_color: &accent_color,
+                        accent_color_2: &accent_color_2,
+                        background_color: &background_color,
+                        background_alpha,
+                        border_width,
+                        roundness,
+                        speed,
+                        intensity,
+                        glow,
+                        scale,
+                        effect: &effect,
+                    });
                     state_tick.preview.set(preview);
                 }
                 InMessage::Levels { levels } => {
@@ -667,7 +693,7 @@ fn tick(state: &PillState) {
     let level = state.current_level.get();
     let base_level = if is_loading && !is_recording { PROCESSING_BASE_LEVEL } else { 0.0 };
     let effective_level = level.max(base_level);
-    let advance = WAVE_BASE_PHASE_STEP + WAVE_PHASE_GAIN * effective_level;
+    let advance = (WAVE_BASE_PHASE_STEP + WAVE_PHASE_GAIN * effective_level) * state.theme.borrow().speed;
     state.wave_phase.set((state.wave_phase.get() + advance) % TAU);
 
     // Pill expand/collapse (spring)

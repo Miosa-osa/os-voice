@@ -79,8 +79,22 @@ pub enum InMessage {
         #[serde(default)]
         accent_color: String,
         #[serde(default)]
+        accent_color_2: String,
+        #[serde(default)]
+        background_color: String,
+        #[serde(default = "default_unit")]
+        background_alpha: f64,
+        #[serde(default = "default_unit")]
+        border_width: f64,
+        #[serde(default = "default_unit")]
+        roundness: f64,
+        #[serde(default = "default_unit")]
+        speed: f64,
+        #[serde(default = "default_unit")]
+        intensity: f64,
+        #[serde(default)]
         glow: bool,
-        #[serde(default = "default_theme_scale")]
+        #[serde(default = "default_unit")]
         scale: f64,
         #[serde(default)]
         effect: String,
@@ -101,7 +115,7 @@ pub enum InMessage {
     Quit,
 }
 
-fn default_theme_scale() -> f64 {
+fn default_unit() -> f64 {
     1.0
 }
 

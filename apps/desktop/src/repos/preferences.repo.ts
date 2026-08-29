@@ -81,20 +81,39 @@ const parsePillTheme = (raw: Nullable<string>): PillTheme => {
   }
   try {
     const parsed = JSON.parse(raw) as Partial<PillTheme>;
+    const hex = (value: unknown, fallback: string): string =>
+      typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value)
+        ? value
+        : fallback;
+    const num = (
+      value: unknown,
+      min: number,
+      max: number,
+      fallback: number,
+    ): number =>
+      typeof value === "number" && Number.isFinite(value)
+        ? Math.min(max, Math.max(min, value))
+        : fallback;
     return {
       waveStyle: PILL_WAVE_STYLES.includes(parsed.waveStyle as PillWaveStyle)
         ? (parsed.waveStyle as PillWaveStyle)
         : DEFAULT_PILL_THEME.waveStyle,
-      accentColor:
-        typeof parsed.accentColor === "string" &&
-        /^#[0-9a-fA-F]{6}$/.test(parsed.accentColor)
-          ? parsed.accentColor
-          : DEFAULT_PILL_THEME.accentColor,
+      accentColor: hex(parsed.accentColor, DEFAULT_PILL_THEME.accentColor),
+      accentColor2:
+        typeof parsed.accentColor2 === "string"
+          ? hex(parsed.accentColor2, DEFAULT_PILL_THEME.accentColor)
+          : null,
+      backgroundColor: hex(
+        parsed.backgroundColor,
+        DEFAULT_PILL_THEME.backgroundColor,
+      ),
+      backgroundAlpha: num(parsed.backgroundAlpha, 0.2, 1, 1),
+      borderWidth: num(parsed.borderWidth, 0, 4, 1),
+      roundness: num(parsed.roundness, 0, 1, 1),
+      speed: num(parsed.speed, 0.4, 2.5, 1),
+      intensity: num(parsed.intensity, 0.4, 2.5, 1),
       glow: parsed.glow === true,
-      scale:
-        typeof parsed.scale === "number" && Number.isFinite(parsed.scale)
-          ? Math.min(1.5, Math.max(0.75, parsed.scale))
-          : DEFAULT_PILL_THEME.scale,
+      scale: num(parsed.scale, 0.75, 1.5, 1),
       effect: PILL_COMPLETION_EFFECTS.includes(
         parsed.effect as PillCompletionEffect,
       )
