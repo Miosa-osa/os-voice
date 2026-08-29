@@ -58,6 +58,12 @@ pub fn run(receiver: Receiver<InMessage>) {
             window.set_namespace("voquill-pill");
         }
         Backend::X11 => {
+            window.set_type_hint(gdk::WindowTypeHint::Dock);
+            window.set_skip_taskbar_hint(true);
+            window.set_skip_pager_hint(true);
+            window.set_keep_above(true);
+            window.set_accept_focus(false);
+            window.stick();
             window.connect_realize(move |window| x11::setup_x11_window(window));
         }
         Backend::PlainWayland => {
