@@ -39,6 +39,9 @@ export const PILL_WAVE_STYLES = [
   "dots",
   "spectrum",
   "orb",
+  "heartbeat",
+  "particles",
+  "liquid",
 ] as const;
 export type PillWaveStyle = (typeof PILL_WAVE_STYLES)[number];
 
@@ -49,6 +52,9 @@ export const PILL_POSITIONS = ["left", "center", "right"] as const;
 export type PillPosition = (typeof PILL_POSITIONS)[number];
 
 export const PILL_LOADING_STYLES = ["bar", "spinner", "dots"] as const;
+
+export const PILL_IDLE_SHAPES = ["bar", "dot"] as const;
+export type PillIdleShape = (typeof PILL_IDLE_SHAPES)[number];
 export type PillLoadingStyle = (typeof PILL_LOADING_STYLES)[number];
 
 export type PillTheme = {
@@ -75,6 +81,10 @@ export type PillTheme = {
   shadow: boolean;
   rainbow: boolean;
   borderColor: string | null;
+  recIndicator: boolean;
+  idleShape: PillIdleShape;
+  strokeWidth: number;
+  waveOpacity: number;
 };
 
 export const DEFAULT_PILL_THEME: PillTheme = {
@@ -101,6 +111,10 @@ export const DEFAULT_PILL_THEME: PillTheme = {
   shadow: false,
   rainbow: false,
   borderColor: null,
+  recIndicator: false,
+  idleShape: "bar",
+  strokeWidth: 1.6,
+  waveOpacity: 1,
 };
 
 export type PillThemePreset = { name: string; theme: PillTheme };

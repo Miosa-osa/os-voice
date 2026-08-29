@@ -159,6 +159,10 @@ pub fn notify_theme(app: &tauri::AppHandle, theme: &serde_json::Value) {
             "shadow": theme.get("shadow").and_then(|v| v.as_bool()).unwrap_or(false),
             "rainbow": theme.get("rainbow").and_then(|v| v.as_bool()).unwrap_or(false),
             "border_color": theme.get("borderColor").and_then(|v| v.as_str()).unwrap_or(""),
+            "rec_indicator": theme.get("recIndicator").and_then(|v| v.as_bool()).unwrap_or(false),
+            "idle_shape": theme.get("idleShape").cloned().unwrap_or_default(),
+            "stroke_width": theme.get("strokeWidth").and_then(|v| v.as_f64()).unwrap_or(1.6),
+            "wave_opacity": theme.get("waveOpacity").and_then(|v| v.as_f64()).unwrap_or(1.0),
             "preview": theme.get("preview").and_then(|v| v.as_bool()).unwrap_or(false),
         });
         if let Ok(json) = serde_json::to_string(&message) {

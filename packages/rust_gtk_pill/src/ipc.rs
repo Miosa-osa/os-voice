@@ -121,6 +121,14 @@ pub enum InMessage {
         #[serde(default)]
         border_color: String,
         #[serde(default)]
+        rec_indicator: bool,
+        #[serde(default)]
+        idle_shape: String,
+        #[serde(default = "default_stroke_width")]
+        stroke_width: f64,
+        #[serde(default = "default_unit")]
+        wave_opacity: f64,
+        #[serde(default)]
         preview: bool,
     },
     BroadcastTranscript { text: String },
@@ -139,6 +147,10 @@ pub enum InMessage {
 
 fn default_unit() -> f64 {
     1.0
+}
+
+fn default_stroke_width() -> f64 {
+    1.6
 }
 
 #[derive(Debug, Serialize)]

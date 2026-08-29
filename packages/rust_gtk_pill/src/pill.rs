@@ -383,6 +383,10 @@ pub fn run(receiver: Receiver<InMessage>) {
                     shadow,
                     rainbow,
                     border_color,
+                    rec_indicator,
+                    idle_shape,
+                    stroke_width,
+                    wave_opacity,
                     preview,
                 } => {
                     *state_tick.theme.borrow_mut() = Theme::from_message(ThemeMessage {
@@ -409,6 +413,10 @@ pub fn run(receiver: Receiver<InMessage>) {
                         shadow,
                         rainbow,
                         border_color: &border_color,
+                        rec_indicator,
+                        idle_shape: &idle_shape,
+                        stroke_width,
+                        wave_opacity,
                     });
                     placement_tick.set(state_tick.theme.borrow().placement());
                     state_tick.preview.set(preview);

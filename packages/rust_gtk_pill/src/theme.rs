@@ -10,6 +10,9 @@ pub(crate) enum WaveStyle {
     Dots,
     Spectrum,
     Orb,
+    Heartbeat,
+    Particles,
+    Liquid,
 }
 
 impl WaveStyle {
@@ -22,6 +25,9 @@ impl WaveStyle {
             "dots" => Self::Dots,
             "spectrum" => Self::Spectrum,
             "orb" => Self::Orb,
+            "heartbeat" => Self::Heartbeat,
+            "particles" => Self::Particles,
+            "liquid" => Self::Liquid,
             _ => Self::Classic,
         }
     }
@@ -60,6 +66,19 @@ impl LoadingStyle {
             "dots" => Self::Dots,
             _ => Self::Bar,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum IdleShape {
+    #[default]
+    Bar,
+    Dot,
+}
+
+impl IdleShape {
+    fn parse(value: &str) -> Self {
+        if value == "dot" { Self::Dot } else { Self::Bar }
     }
 }
 
@@ -112,6 +131,10 @@ pub(crate) struct Theme {
     pub(crate) shadow: bool,
     pub(crate) rainbow: bool,
     pub(crate) border_color: Option<(f64, f64, f64)>,
+    pub(crate) rec_indicator: bool,
+    pub(crate) idle_shape: IdleShape,
+    pub(crate) stroke_width: f64,
+    pub(crate) wave_opacity: f64,
 }
 
 pub(crate) struct ThemeMessage<'a> {
@@ -138,6 +161,10 @@ pub(crate) struct ThemeMessage<'a> {
     pub(crate) shadow: bool,
     pub(crate) rainbow: bool,
     pub(crate) border_color: &'a str,
+    pub(crate) rec_indicator: bool,
+    pub(crate) idle_shape: &'a str,
+    pub(crate) stroke_width: f64,
+    pub(crate) wave_opacity: f64,
 }
 
 impl Default for Theme {
@@ -166,6 +193,10 @@ impl Default for Theme {
             shadow: false,
             rainbow: false,
             border_color: None,
+            rec_indicator: false,
+            idle_shape: IdleShape::Bar,
+            stroke_width: 1.6,
+            wave_opacity: 1.0,
         }
     }
 }
@@ -203,6 +234,10 @@ impl Theme {
             shadow: message.shadow,
             rainbow: message.rainbow,
             border_color: parse_hex_color(message.border_color),
+            rec_indicator: message.rec_indicator,
+            idle_shape: IdleShape::parse(message.idle_shape),
+            stroke_width: clamp(message.stroke_width, 0.5, 4.0, 1.6),
+            wave_opacity: clamp(message.wave_opacity, 0.2, 1.0, 1.0),
         }
     }
 
@@ -292,7 +327,13 @@ mod tests {
             shadow: true,
             rainbow: false,
             border_color: "#112233",
+            rec_indicator: true,
+            idle_shape: "dot",
+            stroke_width: 9.0,
+            wave_opacity: 0.5,
         });
+        assert_eq!(theme.idle_shape, IdleShape::Dot);
+        assert_eq!(theme.stroke_width, 4.0);
         assert_eq!(theme.position, Position::Right);
         assert_eq!(theme.idle_label, "Speak");
         assert_eq!(theme.loading_style, LoadingStyle::Spinner);

@@ -1,17 +1,7 @@
 import {
   AgentMode,
-  DEFAULT_PILL_THEME,
-  PILL_LOADING_STYLES,
-  PILL_POSITIONS,
   DictationPillVisibility,
   Nullable,
-  PILL_COMPLETION_EFFECTS,
-  PILL_WAVE_STYLES,
-  PillCompletionEffect,
-  PillLoadingStyle,
-  PillPosition,
-  PillTheme,
-  PillWaveStyle,
   PostProcessingMode,
   TranscriptionMode,
   UserPreferences,
@@ -23,6 +13,7 @@ import {
 } from "../utils/dictation-limit.utils";
 import { getEffectivePillVisibility, LOCAL_USER_ID } from "../utils/user.utils";
 import { BaseRepo } from "./base.repo";
+import { parsePillThemeJson } from "../utils/pill-theme.utils";
 
 type LocalUserPreferences = {
   userId: string;
@@ -79,79 +70,6 @@ const normalizePostProcessingMode = (
   return "none";
 };
 
-const parsePillTheme = (raw: Nullable<string>): PillTheme => {
-  if (!raw) {
-    return DEFAULT_PILL_THEME;
-  }
-  try {
-    const parsed = JSON.parse(raw) as Partial<PillTheme>;
-    const hex = (value: unknown, fallback: string): string =>
-      typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value)
-        ? value
-        : fallback;
-    const num = (
-      value: unknown,
-      min: number,
-      max: number,
-      fallback: number,
-    ): number =>
-      typeof value === "number" && Number.isFinite(value)
-        ? Math.min(max, Math.max(min, value))
-        : fallback;
-    return {
-      waveStyle: PILL_WAVE_STYLES.includes(parsed.waveStyle as PillWaveStyle)
-        ? (parsed.waveStyle as PillWaveStyle)
-        : DEFAULT_PILL_THEME.waveStyle,
-      accentColor: hex(parsed.accentColor, DEFAULT_PILL_THEME.accentColor),
-      accentColor2:
-        typeof parsed.accentColor2 === "string"
-          ? hex(parsed.accentColor2, DEFAULT_PILL_THEME.accentColor)
-          : null,
-      backgroundColor: hex(
-        parsed.backgroundColor,
-        DEFAULT_PILL_THEME.backgroundColor,
-      ),
-      backgroundAlpha: num(parsed.backgroundAlpha, 0.2, 1, 1),
-      borderWidth: num(parsed.borderWidth, 0, 4, 1),
-      roundness: num(parsed.roundness, 0, 1, 1),
-      speed: num(parsed.speed, 0.4, 2.5, 1),
-      intensity: num(parsed.intensity, 0.4, 2.5, 1),
-      glow: parsed.glow === true,
-      scale: num(parsed.scale, 0.75, 1.5, 1),
-      position: PILL_POSITIONS.includes(parsed.position as PillPosition)
-        ? (parsed.position as PillPosition)
-        : "center",
-      bottomOffset: num(parsed.bottomOffset, 0, 300, 0),
-      idleOpacity: num(parsed.idleOpacity, 0.1, 1, 1),
-      idleWidth: num(parsed.idleWidth, 0.5, 2.5, 1),
-      idleLabel:
-        typeof parsed.idleLabel === "string"
-          ? parsed.idleLabel.slice(0, 40)
-          : "",
-      showTimer: parsed.showTimer === true,
-      reactiveGlow: parsed.reactiveGlow === true,
-      loadingStyle: PILL_LOADING_STYLES.includes(
-        parsed.loadingStyle as PillLoadingStyle,
-      )
-        ? (parsed.loadingStyle as PillLoadingStyle)
-        : "bar",
-      shadow: parsed.shadow === true,
-      rainbow: parsed.rainbow === true,
-      borderColor:
-        typeof parsed.borderColor === "string"
-          ? hex(parsed.borderColor, DEFAULT_PILL_THEME.accentColor)
-          : null,
-      effect: PILL_COMPLETION_EFFECTS.includes(
-        parsed.effect as PillCompletionEffect,
-      )
-        ? (parsed.effect as PillCompletionEffect)
-        : DEFAULT_PILL_THEME.effect,
-    };
-  } catch {
-    return DEFAULT_PILL_THEME;
-  }
-};
-
 const fromLocalPreferences = (
   preferences: LocalUserPreferences,
 ): UserPreferences => ({
@@ -195,7 +113,7 @@ const fromLocalPreferences = (
   menuBarIconHidden: preferences.menuBarIconHidden ?? false,
   insertionMethod: preferences.insertionMethod ?? null,
   typingSpeedMs: preferences.typingSpeedMs ?? null,
-  pillTheme: parsePillTheme(preferences.pillTheme),
+  pillTheme: parsePillThemeJson(preferences.pillTheme),
 });
 
 const toLocalPreferences = (
