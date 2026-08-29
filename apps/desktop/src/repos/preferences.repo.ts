@@ -1,11 +1,15 @@
 import {
   AgentMode,
   DEFAULT_PILL_THEME,
+  PILL_LOADING_STYLES,
+  PILL_POSITIONS,
   DictationPillVisibility,
   Nullable,
   PILL_COMPLETION_EFFECTS,
   PILL_WAVE_STYLES,
   PillCompletionEffect,
+  PillLoadingStyle,
+  PillPosition,
   PillTheme,
   PillWaveStyle,
   PostProcessingMode,
@@ -114,6 +118,29 @@ const parsePillTheme = (raw: Nullable<string>): PillTheme => {
       intensity: num(parsed.intensity, 0.4, 2.5, 1),
       glow: parsed.glow === true,
       scale: num(parsed.scale, 0.75, 1.5, 1),
+      position: PILL_POSITIONS.includes(parsed.position as PillPosition)
+        ? (parsed.position as PillPosition)
+        : "center",
+      bottomOffset: num(parsed.bottomOffset, 0, 300, 0),
+      idleOpacity: num(parsed.idleOpacity, 0.1, 1, 1),
+      idleWidth: num(parsed.idleWidth, 0.5, 2.5, 1),
+      idleLabel:
+        typeof parsed.idleLabel === "string"
+          ? parsed.idleLabel.slice(0, 40)
+          : "",
+      showTimer: parsed.showTimer === true,
+      reactiveGlow: parsed.reactiveGlow === true,
+      loadingStyle: PILL_LOADING_STYLES.includes(
+        parsed.loadingStyle as PillLoadingStyle,
+      )
+        ? (parsed.loadingStyle as PillLoadingStyle)
+        : "bar",
+      shadow: parsed.shadow === true,
+      rainbow: parsed.rainbow === true,
+      borderColor:
+        typeof parsed.borderColor === "string"
+          ? hex(parsed.borderColor, DEFAULT_PILL_THEME.accentColor)
+          : null,
       effect: PILL_COMPLETION_EFFECTS.includes(
         parsed.effect as PillCompletionEffect,
       )

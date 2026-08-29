@@ -12,15 +12,21 @@ import {
   Stack,
   Switch,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
 } from "@mui/material";
 import type { SelectChangeEvent } from "@mui/material";
 import {
   DEFAULT_PILL_THEME,
   PILL_COMPLETION_EFFECTS,
+  PILL_LOADING_STYLES,
+  PILL_POSITIONS,
   PILL_THEME_PRESETS,
   PILL_WAVE_STYLES,
   type PillCompletionEffect,
+  type PillLoadingStyle,
+  type PillPosition,
   type PillTheme,
   type PillWaveStyle,
 } from "@voquill/types";
@@ -51,6 +57,18 @@ const WAVE_STYLE_LABELS: Record<PillWaveStyle, string> = {
   dots: "Dots",
   spectrum: "Spectrum",
   orb: "Orb",
+};
+
+const LOADING_LABELS: Record<PillLoadingStyle, string> = {
+  bar: "Progress bar",
+  spinner: "Spinner",
+  dots: "Pulsing dots",
+};
+
+const POSITION_LABELS: Record<PillPosition, string> = {
+  left: "Left",
+  center: "Center",
+  right: "Right",
 };
 
 const EFFECT_LABELS: Record<PillCompletionEffect, string> = {
@@ -340,6 +358,151 @@ export const AppearanceDialog = () => {
               format={times}
               onChange={(intensity) => update({ intensity })}
             />,
+          )}
+
+          {section(
+            <FormattedMessage defaultMessage="Position" />,
+            <FormattedMessage defaultMessage="Where the pill sits along the bottom of the screen, and how far up." />,
+            <Stack direction="row" spacing={1} alignItems="center">
+              <ToggleButtonGroup
+                size="small"
+                exclusive
+                value={theme.position}
+                onChange={(_, value: PillPosition | null) => {
+                  if (value) update({ position: value });
+                }}
+              >
+                {PILL_POSITIONS.map((position) => (
+                  <ToggleButton key={position} value={position}>
+                    {POSITION_LABELS[position]}
+                  </ToggleButton>
+                ))}
+              </ToggleButtonGroup>
+              <Range
+                value={theme.bottomOffset}
+                min={0}
+                max={300}
+                step={10}
+                format={(value) => `${value}px`}
+                onChange={(bottomOffset) => update({ bottomOffset })}
+              />
+            </Stack>,
+          )}
+
+          {section(
+            <FormattedMessage defaultMessage="Idle look" />,
+            <FormattedMessage defaultMessage="The small resting pill: opacity, width, and the text shown when you hover it." />,
+            <Stack spacing={0.5} alignItems="flex-end">
+              <Range
+                value={theme.idleOpacity}
+                min={0.1}
+                max={1}
+                step={0.05}
+                format={percent}
+                onChange={(idleOpacity) => update({ idleOpacity })}
+              />
+              <Range
+                value={theme.idleWidth}
+                min={0.5}
+                max={2.5}
+                step={0.1}
+                format={times}
+                onChange={(idleWidth) => update({ idleWidth })}
+              />
+              <TextField
+                size="small"
+                placeholder="Click to dictate"
+                value={theme.idleLabel}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  update({ idleLabel: event.target.value.slice(0, 40) })
+                }
+                sx={{ width: 160 }}
+              />
+            </Stack>,
+          )}
+
+          {section(
+            <FormattedMessage defaultMessage="Recording timer" />,
+            <FormattedMessage defaultMessage="Show elapsed time above the pill while recording." />,
+            <Switch
+              edge="end"
+              checked={theme.showTimer}
+              onChange={(event) => update({ showTimer: event.target.checked })}
+            />,
+          )}
+
+          {section(
+            <FormattedMessage defaultMessage="Reactive glow" />,
+            <FormattedMessage defaultMessage="Glow brightness follows your voice." />,
+            <Switch
+              edge="end"
+              checked={theme.reactiveGlow}
+              onChange={(event) =>
+                update({ reactiveGlow: event.target.checked })
+              }
+            />,
+          )}
+
+          {section(
+            <FormattedMessage defaultMessage="Shadow" />,
+            <FormattedMessage defaultMessage="Soft drop shadow under the pill." />,
+            <Switch
+              edge="end"
+              checked={theme.shadow}
+              onChange={(event) => update({ shadow: event.target.checked })}
+            />,
+          )}
+
+          {section(
+            <FormattedMessage defaultMessage="Rainbow" />,
+            <FormattedMessage defaultMessage="Cycle the accent through every hue over time." />,
+            <Switch
+              edge="end"
+              checked={theme.rainbow}
+              onChange={(event) => update({ rainbow: event.target.checked })}
+            />,
+          )}
+
+          {section(
+            <FormattedMessage defaultMessage="Border color" />,
+            <FormattedMessage defaultMessage="Use a color other than the accent for the outline." />,
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Switch
+                edge="end"
+                checked={theme.borderColor !== null}
+                onChange={(event) =>
+                  update({
+                    borderColor: event.target.checked ? "#FFFFFF" : null,
+                  })
+                }
+              />
+              {theme.borderColor !== null && (
+                <ColorPicker
+                  value={theme.borderColor}
+                  label={intl.formatMessage({ defaultMessage: "Border color" })}
+                  onChange={(borderColor) => update({ borderColor })}
+                />
+              )}
+            </Stack>,
+          )}
+
+          {section(
+            <FormattedMessage defaultMessage="Processing style" />,
+            <FormattedMessage defaultMessage="What the pill shows while your dictation is being transcribed." />,
+            <Select<PillLoadingStyle>
+              size="small"
+              value={theme.loadingStyle}
+              onChange={(event: SelectChangeEvent<PillLoadingStyle>) =>
+                update({ loadingStyle: event.target.value as PillLoadingStyle })
+              }
+              sx={{ minWidth: 160 }}
+            >
+              {PILL_LOADING_STYLES.map((style) => (
+                <MenuItem key={style} value={style}>
+                  {LOADING_LABELS[style]}
+                </MenuItem>
+              ))}
+            </Select>,
           )}
 
           {section(

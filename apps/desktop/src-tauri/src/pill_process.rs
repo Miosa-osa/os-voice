@@ -148,6 +148,17 @@ pub fn notify_theme(app: &tauri::AppHandle, theme: &serde_json::Value) {
             "glow": theme.get("glow").and_then(|v| v.as_bool()).unwrap_or(false),
             "scale": theme.get("scale").and_then(|v| v.as_f64()).unwrap_or(1.0),
             "effect": theme.get("effect").cloned().unwrap_or_default(),
+            "position": theme.get("position").cloned().unwrap_or_default(),
+            "bottom_offset": theme.get("bottomOffset").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            "idle_opacity": theme.get("idleOpacity").and_then(|v| v.as_f64()).unwrap_or(1.0),
+            "idle_width": theme.get("idleWidth").and_then(|v| v.as_f64()).unwrap_or(1.0),
+            "idle_label": theme.get("idleLabel").cloned().unwrap_or_default(),
+            "show_timer": theme.get("showTimer").and_then(|v| v.as_bool()).unwrap_or(false),
+            "reactive_glow": theme.get("reactiveGlow").and_then(|v| v.as_bool()).unwrap_or(false),
+            "loading_style": theme.get("loadingStyle").cloned().unwrap_or_default(),
+            "shadow": theme.get("shadow").and_then(|v| v.as_bool()).unwrap_or(false),
+            "rainbow": theme.get("rainbow").and_then(|v| v.as_bool()).unwrap_or(false),
+            "border_color": theme.get("borderColor").and_then(|v| v.as_str()).unwrap_or(""),
             "preview": theme.get("preview").and_then(|v| v.as_bool()).unwrap_or(false),
         });
         if let Ok(json) = serde_json::to_string(&message) {

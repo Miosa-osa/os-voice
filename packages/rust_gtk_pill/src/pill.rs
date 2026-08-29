@@ -11,7 +11,7 @@ use gtk_layer_shell::LayerShell;
 use crate::constants::*;
 use crate::ipc::{self, InMessage, OutMessage, Phase, Visibility};
 use crate::state::{FlameTongue, PillState, Rocket, RocketPhase, Spark, WindowMode};
-use crate::theme::{CompletionEffect, Theme, ThemeMessage};
+use crate::theme::{CompletionEffect, Placement, Theme, ThemeMessage};
 use crate::{draw, input, x11};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +33,7 @@ pub fn run(receiver: Receiver<InMessage>) {
         }
     };
 
+    let placement = Rc::new(Cell::new(Placement::default()));
     let window = gtk::Window::new(gtk::WindowType::Toplevel);
     if backend != Backend::PlainWayland {
         window.set_default_size(WINDOW_W_TYPING, WINDOW_H_TYPING);
@@ -58,13 +59,14 @@ pub fn run(receiver: Receiver<InMessage>) {
             window.set_namespace("voquill-pill");
         }
         Backend::X11 => {
+            let placement = placement.clone();
             window.set_type_hint(gdk::WindowTypeHint::Dock);
             window.set_skip_taskbar_hint(true);
             window.set_skip_pager_hint(true);
             window.set_keep_above(true);
             window.set_accept_focus(false);
             window.stick();
-            window.connect_realize(move |window| x11::setup_x11_window(window));
+            window.connect_realize(move |window| x11::setup_x11_window(window, placement.clone()));
         }
         Backend::PlainWayland => {
             window.set_type_hint(gdk::WindowTypeHint::Dock);
@@ -159,6 +161,8 @@ pub fn run(receiver: Receiver<InMessage>) {
         theme: RefCell::new(Theme::default()),
         preview: Cell::new(false),
         preview_clock: Cell::new(0.0),
+        rainbow_clock: Cell::new(0.0),
+        recording_started: Cell::new(None),
         sparkle_active: Cell::new(false),
         sparkle_elapsed: Cell::new(0.0),
         fireworks_active: Cell::new(false),
@@ -333,6 +337,7 @@ pub fn run(receiver: Receiver<InMessage>) {
     let quit_flag = Rc::new(Cell::new(false));
     let quit_tick = quit_flag.clone();
     let backend_tick = backend;
+    let placement_tick = placement.clone();
     glib::timeout_add_local(Duration::from_millis(16), move || {
         let rx = receiver.borrow();
         while let Ok(msg) = rx.try_recv() {
@@ -348,6 +353,11 @@ pub fn run(receiver: Receiver<InMessage>) {
                     if phase == Phase::Idle && prev == Phase::Loading {
                         trigger_completion_effect(&state_tick);
                     }
+                    if phase == Phase::Recording && prev != Phase::Recording {
+                        state_tick.recording_started.set(Some(Instant::now()));
+                    } else if phase == Phase::Idle {
+                        state_tick.recording_started.set(None);
+                    }
                 }
                 InMessage::Theme {
                     wave_style,
@@ -362,6 +372,17 @@ pub fn run(receiver: Receiver<InMessage>) {
                     glow,
                     scale,
                     effect,
+                    position,
+                    bottom_offset,
+                    idle_opacity,
+                    idle_width,
+                    idle_label,
+                    show_timer,
+                    reactive_glow,
+                    loading_style,
+                    shadow,
+                    rainbow,
+                    border_color,
                     preview,
                 } => {
                     *state_tick.theme.borrow_mut() = Theme::from_message(ThemeMessage {
@@ -377,7 +398,19 @@ pub fn run(receiver: Receiver<InMessage>) {
                         glow,
                         scale,
                         effect: &effect,
+                        position: &position,
+                        bottom_offset,
+                        idle_opacity,
+                        idle_width,
+                        idle_label: &idle_label,
+                        show_timer,
+                        reactive_glow,
+                        loading_style: &loading_style,
+                        shadow,
+                        rainbow,
+                        border_color: &border_color,
                     });
+                    placement_tick.set(state_tick.theme.borrow().placement());
                     state_tick.preview.set(preview);
                 }
                 InMessage::Levels { levels } => {
@@ -645,6 +678,7 @@ fn trigger_completion_effect(state: &PillState) {
 }
 
 fn tick(state: &PillState) {
+    state.rainbow_clock.set((state.rainbow_clock.get() + SPRING_DT) % 1000.0);
     if state.sparkle_active.get() {
         let elapsed = state.sparkle_elapsed.get() + SPRING_DT;
         state.sparkle_elapsed.set(elapsed);

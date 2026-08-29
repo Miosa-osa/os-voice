@@ -99,6 +99,28 @@ pub enum InMessage {
         #[serde(default)]
         effect: String,
         #[serde(default)]
+        position: String,
+        #[serde(default)]
+        bottom_offset: f64,
+        #[serde(default = "default_unit")]
+        idle_opacity: f64,
+        #[serde(default = "default_unit")]
+        idle_width: f64,
+        #[serde(default)]
+        idle_label: String,
+        #[serde(default)]
+        show_timer: bool,
+        #[serde(default)]
+        reactive_glow: bool,
+        #[serde(default)]
+        loading_style: String,
+        #[serde(default)]
+        shadow: bool,
+        #[serde(default)]
+        rainbow: bool,
+        #[serde(default)]
+        border_color: String,
+        #[serde(default)]
         preview: bool,
     },
     BroadcastTranscript { text: String },

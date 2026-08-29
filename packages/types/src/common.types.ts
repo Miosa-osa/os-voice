@@ -45,6 +45,12 @@ export type PillWaveStyle = (typeof PILL_WAVE_STYLES)[number];
 export const PILL_COMPLETION_EFFECTS = ["none", "sparkle", "fireworks"] as const;
 export type PillCompletionEffect = (typeof PILL_COMPLETION_EFFECTS)[number];
 
+export const PILL_POSITIONS = ["left", "center", "right"] as const;
+export type PillPosition = (typeof PILL_POSITIONS)[number];
+
+export const PILL_LOADING_STYLES = ["bar", "spinner", "dots"] as const;
+export type PillLoadingStyle = (typeof PILL_LOADING_STYLES)[number];
+
 export type PillTheme = {
   waveStyle: PillWaveStyle;
   accentColor: string;
@@ -58,6 +64,17 @@ export type PillTheme = {
   glow: boolean;
   scale: number;
   effect: PillCompletionEffect;
+  position: PillPosition;
+  bottomOffset: number;
+  idleOpacity: number;
+  idleWidth: number;
+  idleLabel: string;
+  showTimer: boolean;
+  reactiveGlow: boolean;
+  loadingStyle: PillLoadingStyle;
+  shadow: boolean;
+  rainbow: boolean;
+  borderColor: string | null;
 };
 
 export const DEFAULT_PILL_THEME: PillTheme = {
@@ -73,6 +90,17 @@ export const DEFAULT_PILL_THEME: PillTheme = {
   glow: false,
   scale: 1,
   effect: "none",
+  position: "center",
+  bottomOffset: 0,
+  idleOpacity: 1,
+  idleWidth: 1,
+  idleLabel: "",
+  showTimer: false,
+  reactiveGlow: false,
+  loadingStyle: "bar",
+  shadow: false,
+  rainbow: false,
+  borderColor: null,
 };
 
 export type PillThemePreset = { name: string; theme: PillTheme };
@@ -99,9 +127,12 @@ export const PILL_THEME_PRESETS: PillThemePreset[] = [
       accentColor2: "#00F0FF",
       backgroundColor: "#050505",
       glow: true,
+      reactiveGlow: true,
+      rainbow: false,
       speed: 1.3,
       intensity: 1.3,
       effect: "sparkle",
+      loadingStyle: "dots",
     },
   },
   {
@@ -125,7 +156,10 @@ export const PILL_THEME_PRESETS: PillThemePreset[] = [
       accentColor2: "#FB7185",
       backgroundColor: "#2A0F1E",
       glow: true,
+      reactiveGlow: true,
       borderWidth: 0,
+      shadow: true,
+      loadingStyle: "spinner",
     },
   },
   {

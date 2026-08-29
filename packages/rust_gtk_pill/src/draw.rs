@@ -6,7 +6,7 @@ use crate::ipc::{Phase, PillPermission, PillStreaming};
 
 use crate::constants::*;
 use crate::state::{ClickAction, ClickRegion, PillState, RocketPhase};
-use crate::theme::{Theme, WaveStyle};
+use crate::theme::{hue_to_rgb, LoadingStyle, Theme, WaveStyle};
 
 pub(crate) fn draw_all(cr: &cairo::Context, state: &PillState) {
     cr.set_operator(cairo::Operator::Source);
@@ -69,8 +69,11 @@ pub(crate) fn draw_all(cr: &cairo::Context, state: &PillState) {
 
 pub(crate) fn pill_position(state: &PillState, ww: f64, wh: f64) -> (f64, f64, f64, f64) {
     let expand_t = state.expand_t.get();
-    let scale = state.theme.borrow().scale;
-    let pill_w = lerp(MIN_PILL_WIDTH, EXPANDED_PILL_WIDTH * scale, expand_t);
+    let (scale, idle_width) = {
+        let theme = state.theme.borrow();
+        (theme.scale, theme.idle_width)
+    };
+    let pill_w = lerp(MIN_PILL_WIDTH * idle_width, EXPANDED_PILL_WIDTH * scale, expand_t);
     let pill_h = lerp(MIN_PILL_HEIGHT, EXPANDED_PILL_HEIGHT * scale, expand_t);
     let pill_x = (ww - pill_w) / 2.0;
 
@@ -90,8 +93,13 @@ fn draw_pill(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64) {
     let expand_t = state.expand_t.get();
     let (rx, ry, pill_w, pill_h) = pill_position(state, ww, wh);
 
-    let theme = state.theme.borrow().clone();
-    let bg_alpha = lerp(IDLE_BG_ALPHA, ACTIVE_BG_ALPHA * theme.background_alpha, expand_t);
+    let mut theme = state.theme.borrow().clone();
+    if theme.rainbow {
+        let hue = state.rainbow_clock.get() * 0.12;
+        theme.accent = hue_to_rgb(hue);
+        theme.accent2 = Some(hue_to_rgb(hue + 0.3));
+    }
+    let bg_alpha = lerp(IDLE_BG_ALPHA * theme.idle_opacity, ACTIVE_BG_ALPHA * theme.background_alpha, expand_t);
     let radius = lerp(COLLAPSED_RADIUS, EXPANDED_RADIUS * (0.15 + 0.85 * theme.roundness), expand_t);
 
     let is_typing = state.assistant_active.get()
@@ -102,11 +110,21 @@ fn draw_pill(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64) {
 
     let (ar, ag, ab) = theme.accent;
     let (br, bg, bb) = theme.background;
+    let (borr, borg, borb) = theme.border_color.unwrap_or(theme.accent);
+
+    if theme.shadow {
+        for (spread, alpha) in [(6.0, 0.05), (3.0, 0.1), (1.0, 0.18)] {
+            rounded_rect(cr, rx - spread, ry - spread + 3.0, pill_w + spread * 2.0, pill_h + spread * 2.0, radius + spread);
+            cr.set_source_rgba(0.0, 0.0, 0.0, alpha);
+            let _ = cr.fill();
+        }
+    }
 
     if theme.glow && expand_t > 0.1 {
+        let reactive = if theme.reactive_glow { 0.35 + 0.9 * wave_level(state, &theme) } else { 1.0 };
         for (spread, alpha) in [(6.0, 0.06), (4.0, 0.12), (2.0, 0.2)] {
             rounded_rect(cr, rx - spread, ry - spread, pill_w + spread * 2.0, pill_h + spread * 2.0, radius + spread);
-            cr.set_source_rgba(ar, ag, ab, alpha * expand_t);
+            cr.set_source_rgba(ar, ag, ab, alpha * expand_t * reactive);
             let _ = cr.fill();
         }
     }
@@ -118,7 +136,7 @@ fn draw_pill(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64) {
     if theme.border_width > 0.0 {
         let inset = theme.border_width / 2.0;
         rounded_rect(cr, rx + inset, ry + inset, pill_w - theme.border_width, pill_h - theme.border_width, (radius - inset).max(0.0));
-        cr.set_source_rgba(ar, ag, ab, BORDER_ALPHA);
+        cr.set_source_rgba(borr, borg, borb, if theme.border_color.is_some() { 0.85 } else { BORDER_ALPHA });
         cr.set_line_width(theme.border_width);
         let _ = cr.stroke();
     }
@@ -137,12 +155,19 @@ fn draw_pill(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64) {
                 WaveStyle::Orb => draw_waveform_orb(cr, rx, ry, pill_w, pill_h, expand_t, state, &theme),
             }
             draw_edge_gradient(cr, rx, ry, pill_w, pill_h, radius, expand_t);
+            if theme.show_timer {
+                draw_timer(cr, state, &theme, rx, ry, pill_w, expand_t);
+            }
         }
         Phase::Loading if expand_t > 0.1 => {
-            draw_loading(cr, rx, ry, pill_w, pill_h, radius, expand_t, state);
+            match theme.loading_style {
+                LoadingStyle::Bar => draw_loading(cr, rx, ry, pill_w, pill_h, radius, expand_t, state),
+                LoadingStyle::Spinner => draw_loading_spinner(cr, rx, ry, pill_w, pill_h, expand_t, state, &theme),
+                LoadingStyle::Dots => draw_loading_dots(cr, rx, ry, pill_w, pill_h, expand_t, state, &theme),
+            }
         }
         Phase::Idle if expand_t > 0.5 && (state.hovered.get() || state.assistant_active.get()) => {
-            draw_idle_label(cr, rx, ry, pill_w, pill_h, expand_t);
+            draw_idle_label(cr, rx, ry, pill_w, pill_h, expand_t, &theme);
         }
         _ => {}
     }
@@ -476,11 +501,62 @@ fn draw_loading(
     draw_edge_gradient(cr, rx, ry, pill_w, pill_h, radius, expand_t);
 }
 
-fn draw_idle_label(cr: &cairo::Context, rx: f64, ry: f64, pill_w: f64, pill_h: f64, expand_t: f64) {
+fn draw_timer(cr: &cairo::Context, state: &PillState, theme: &Theme, rx: f64, ry: f64, pill_w: f64, expand_t: f64) {
+    let seconds = state
+        .recording_started
+        .get()
+        .map(|started| started.elapsed().as_secs())
+        .unwrap_or_else(|| state.preview_clock.get() as u64);
+    let text = format!("{}:{:02}", seconds / 60, seconds % 60);
+    let (r, g, b) = theme.accent;
+    cr.set_source_rgba(r, g, b, 0.85 * expand_t);
+    cr.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
+    cr.set_font_size(10.0);
+    let extents = cr.text_extents(&text).unwrap();
+    cr.move_to(rx + (pill_w - extents.width()) / 2.0 - extents.x_bearing(), ry - 6.0);
+    let _ = cr.show_text(&text);
+}
+
+fn draw_loading_spinner(
+    cr: &cairo::Context, rx: f64, ry: f64, pill_w: f64, pill_h: f64,
+    expand_t: f64, state: &PillState, theme: &Theme,
+) {
+    let (r, g, b) = theme.accent;
+    let cx = rx + pill_w / 2.0;
+    let cy = ry + pill_h / 2.0;
+    let radius = pill_h * 0.28;
+    let start = state.loading_offset.get() * TAU * 1.5;
+    cr.set_source_rgba(r, g, b, 0.2 * expand_t);
+    cr.set_line_width(2.0);
+    cr.arc(cx, cy, radius, 0.0, TAU);
+    let _ = cr.stroke();
+    cr.set_source_rgba(r, g, b, 0.9 * expand_t);
+    cr.set_line_cap(cairo::LineCap::Round);
+    cr.arc(cx, cy, radius, start, start + TAU * 0.3);
+    let _ = cr.stroke();
+}
+
+fn draw_loading_dots(
+    cr: &cairo::Context, rx: f64, ry: f64, pill_w: f64, pill_h: f64,
+    expand_t: f64, state: &PillState, theme: &Theme,
+) {
+    let (r, g, b) = theme.accent;
+    let cy = ry + pill_h / 2.0;
+    let phase = state.loading_offset.get() * TAU;
+    for i in 0..3 {
+        let pulse = 0.5 + 0.5 * (phase * 1.5 - i as f64 * 1.3).sin();
+        let x = rx + pill_w / 2.0 + (i as f64 - 1.0) * 12.0;
+        cr.set_source_rgba(r, g, b, (0.25 + 0.7 * pulse) * expand_t);
+        cr.arc(x, cy, 2.0 + 1.5 * pulse, 0.0, TAU);
+        let _ = cr.fill();
+    }
+}
+
+fn draw_idle_label(cr: &cairo::Context, rx: f64, ry: f64, pill_w: f64, pill_h: f64, expand_t: f64, theme: &Theme) {
     cr.set_source_rgba(1.0, 1.0, 1.0, 0.4 * expand_t);
     cr.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
     cr.set_font_size(11.0);
-    let text = "Click to dictate";
+    let text = if theme.idle_label.is_empty() { "Click to dictate" } else { theme.idle_label.as_str() };
     let extents = cr.text_extents(text).unwrap();
     let tx = rx + (pill_w - extents.width()) / 2.0 - extents.x_bearing();
     let ty = ry + (pill_h - extents.height()) / 2.0 - extents.y_bearing();

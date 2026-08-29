@@ -8,6 +8,7 @@ use gtk::glib::{self, ControlFlow};
 use gtk::prelude::*;
 
 use crate::constants::MARGIN_BOTTOM;
+use crate::theme::{Placement, Position};
 
 // In a Wayland session the pill runs through XWayland, where GNOME's dock
 // (a gnome-shell component) reserves no X11 struts, so _NET_WORKAREA does not
@@ -92,7 +93,7 @@ fn detect_wayland_dock_reserve() -> Option<DockReserve> {
     })
 }
 
-pub(crate) fn setup_x11_window(window: &gtk::Window) {
+pub(crate) fn setup_x11_window(window: &gtk::Window, placement: Rc<Cell<Placement>>) {
     use std::ffi::{c_char, c_int, c_uchar, c_uint, c_ulong, c_void};
 
     type XDisplay = c_void;
@@ -228,11 +229,16 @@ pub(crate) fn setup_x11_window(window: &gtk::Window) {
                         Some(d) if d.applies_to(&monitor) => d.height,
                         _ => 0.0,
                     };
-                    let margin = (MARGIN_BOTTOM as f64 + dock) * scale;
-                    return Some((
-                        (wa_x + (wa_w - win_w) / 2.0) as c_int,
-                        (wa_y + wa_h - win_h - margin) as c_int,
-                    ));
+                    let placement = placement.get();
+                    let margin = (MARGIN_BOTTOM as f64 + dock + placement.bottom_offset) * scale;
+                    let side_margin = 24.0 * scale;
+                    let pill_inset = (win_w - placement.pill_width * scale) / 2.0;
+                    let x = match placement.position {
+                        Position::Left => wa_x + side_margin - pill_inset,
+                        Position::Center => wa_x + (wa_w - win_w) / 2.0,
+                        Position::Right => wa_x + wa_w - side_margin - win_w + pill_inset,
+                    };
+                    return Some((x as c_int, (wa_y + wa_h - win_h - margin) as c_int));
                 }
             }
             None

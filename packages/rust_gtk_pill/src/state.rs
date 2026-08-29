@@ -186,6 +186,8 @@ pub(crate) struct PillState {
     pub(crate) theme: RefCell<Theme>,
     pub(crate) preview: Cell<bool>,
     pub(crate) preview_clock: Cell<f64>,
+    pub(crate) rainbow_clock: Cell<f64>,
+    pub(crate) recording_started: Cell<Option<std::time::Instant>>,
     pub(crate) sparkle_active: Cell<bool>,
     pub(crate) sparkle_elapsed: Cell<f64>,
 
