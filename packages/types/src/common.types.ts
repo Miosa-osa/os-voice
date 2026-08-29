@@ -30,6 +30,34 @@ export type AgentMode = PostProcessingMode | "openclaw";
 
 export type DictationPillVisibility = "hidden" | "while_active" | "persistent";
 
+export const PILL_WAVE_STYLES = [
+  "classic",
+  "ribbon",
+  "bars",
+  "pulse",
+  "minimal",
+] as const;
+export type PillWaveStyle = (typeof PILL_WAVE_STYLES)[number];
+
+export const PILL_COMPLETION_EFFECTS = ["none", "sparkle", "fireworks"] as const;
+export type PillCompletionEffect = (typeof PILL_COMPLETION_EFFECTS)[number];
+
+export type PillTheme = {
+  waveStyle: PillWaveStyle;
+  accentColor: string;
+  glow: boolean;
+  scale: number;
+  effect: PillCompletionEffect;
+};
+
+export const DEFAULT_PILL_THEME: PillTheme = {
+  waveStyle: "classic",
+  accentColor: "#FFFFFF",
+  glow: false,
+  scale: 1,
+  effect: "none",
+};
+
 export type PullStatus = "in_progress" | "error" | "complete";
 
 export const STYLING_MODES = ["app", "manual"] as const;

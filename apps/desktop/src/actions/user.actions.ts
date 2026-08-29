@@ -1,6 +1,8 @@
 import {
   type AgentMode,
+  DEFAULT_PILL_THEME,
   DictationPillVisibility,
+  PillTheme,
   Nullable,
   StylingMode,
   User,
@@ -117,6 +119,7 @@ export const createDefaultPreferences = (): UserPreferences => ({
   menuBarIconHidden: false,
   insertionMethod: null,
   typingSpeedMs: null,
+  pillTheme: DEFAULT_PILL_THEME,
 });
 
 export const updateUserPreferences = async (
@@ -658,6 +661,12 @@ export const setDictationPillVisibility = async (
   await updateUserPreferences((preferences) => {
     preferences.dictationPillVisibility = visibility;
   }, "Failed to save dictation pill visibility preference. Please try again.");
+};
+
+export const setPillTheme = async (theme: PillTheme): Promise<void> => {
+  await updateUserPreferences((preferences) => {
+    preferences.pillTheme = theme;
+  }, "Failed to save pill appearance. Please try again.");
 };
 
 export const setDictationLimitMinutes = async (

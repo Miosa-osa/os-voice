@@ -11,6 +11,7 @@ use gtk_layer_shell::LayerShell;
 use crate::constants::*;
 use crate::ipc::{self, InMessage, OutMessage, Phase, Visibility};
 use crate::state::{FlameTongue, PillState, Rocket, RocketPhase, Spark, WindowMode};
+use crate::theme::{CompletionEffect, Theme};
 use crate::{draw, input, x11};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,6 +150,9 @@ pub fn run(receiver: Receiver<InMessage>) {
         flash_is_error: Cell::new(false),
         flash_action: RefCell::new(None),
         flash_action_label: RefCell::new(None),
+        theme: RefCell::new(Theme::default()),
+        sparkle_active: Cell::new(false),
+        sparkle_elapsed: Cell::new(0.0),
         fireworks_active: Cell::new(false),
         fireworks_elapsed: Cell::new(0.0),
         fireworks_next_launch: Cell::new(0),
@@ -333,6 +337,13 @@ pub fn run(receiver: Receiver<InMessage>) {
                         state_tick.current_level.set(0.0);
                         state_tick.wave_phase.set(0.0);
                     }
+                    if phase == Phase::Idle && prev == Phase::Loading {
+                        trigger_completion_effect(&state_tick);
+                    }
+                }
+                InMessage::Theme { wave_style, accent_color, glow, scale, effect } => {
+                    *state_tick.theme.borrow_mut() =
+                        Theme::from_message(&wave_style, &accent_color, glow, scale, &effect);
                 }
                 InMessage::Levels { levels } => {
                     *state_tick.pending_levels.borrow_mut() = levels;
@@ -580,7 +591,32 @@ pub fn run(receiver: Receiver<InMessage>) {
     main_loop.run();
 }
 
+fn trigger_completion_effect(state: &PillState) {
+    let effect = state.theme.borrow().effect;
+    match effect {
+        CompletionEffect::None => {}
+        CompletionEffect::Sparkle => {
+            state.sparkle_active.set(true);
+            state.sparkle_elapsed.set(0.0);
+        }
+        CompletionEffect::Fireworks => {
+            state.fireworks_active.set(true);
+            state.fireworks_elapsed.set(0.0);
+            state.fireworks_next_launch.set(0);
+            state.fireworks_rockets.borrow_mut().clear();
+        }
+    }
+}
+
 fn tick(state: &PillState) {
+    if state.sparkle_active.get() {
+        let elapsed = state.sparkle_elapsed.get() + SPRING_DT;
+        state.sparkle_elapsed.set(elapsed);
+        if elapsed >= SPARKLE_DURATION {
+            state.sparkle_active.set(false);
+        }
+    }
+
     let phase = state.phase.get();
     let is_active = phase != Phase::Idle;
     let is_recording = phase == Phase::Recording;

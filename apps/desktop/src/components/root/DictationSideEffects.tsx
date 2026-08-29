@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { AppTarget } from "@voquill/types";
+import { AppTarget, DEFAULT_PILL_THEME } from "@voquill/types";
 import { delayed } from "@voquill/utilities";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useIntl } from "react-intl";
@@ -880,6 +880,13 @@ export const DictationSideEffects = () => {
       console.error,
     );
   }, [pillVisibility]);
+
+  const pillTheme = useAppStore(
+    (state) => state.userPrefs?.pillTheme ?? DEFAULT_PILL_THEME,
+  );
+  useEffect(() => {
+    invoke("set_pill_theme", { theme: pillTheme }).catch(console.error);
+  }, [pillTheme]);
 
   const pillHasContent = useAppStore((state) => {
     if (!state.pillConversationId) return false;

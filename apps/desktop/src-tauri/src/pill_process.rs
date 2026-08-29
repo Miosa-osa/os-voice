@@ -132,6 +132,18 @@ pub fn notify_style_info(app: &tauri::AppHandle, count: u32, name: &str) {
     }
 }
 
+pub fn notify_theme(app: &tauri::AppHandle, theme: &serde_json::Value) {
+    if let Some(pill) = app.try_state::<std::sync::Arc<PillProcess>>() {
+        let mut message = theme.clone();
+        if let Some(object) = message.as_object_mut() {
+            object.insert("type".to_string(), serde_json::Value::String("theme".to_string()));
+            if let Ok(json) = serde_json::to_string(&message) {
+                pill.send(&json);
+            }
+        }
+    }
+}
+
 pub fn notify_pill_window_size(app: &tauri::AppHandle, size: &PillWindowSize) {
     if let Some(pill) = app.try_state::<std::sync::Arc<PillProcess>>() {
         let size_str = match size {

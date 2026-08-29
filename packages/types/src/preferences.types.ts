@@ -2,6 +2,7 @@ import type {
   AgentMode,
   DictationPillVisibility,
   Nullable,
+  PillTheme,
   PostProcessingMode,
   TranscriptionMode,
 } from "./common.types";
@@ -30,6 +31,7 @@ export type UserPreferences = {
   incognitoModeIncludeInStats: boolean;
   dictationLimitMinutes: number;
   dictationPillVisibility: DictationPillVisibility;
+  pillTheme: PillTheme;
   realtimeOutputEnabled: boolean;
   remoteOutputEnabled: boolean;
   remoteTargetDeviceId: Nullable<string>;

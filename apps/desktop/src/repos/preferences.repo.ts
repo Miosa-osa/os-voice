@@ -1,7 +1,13 @@
 import {
   AgentMode,
+  DEFAULT_PILL_THEME,
   DictationPillVisibility,
   Nullable,
+  PILL_COMPLETION_EFFECTS,
+  PILL_WAVE_STYLES,
+  PillCompletionEffect,
+  PillTheme,
+  PillWaveStyle,
   PostProcessingMode,
   TranscriptionMode,
   UserPreferences,
@@ -53,6 +59,7 @@ type LocalUserPreferences = {
   menuBarIconHidden: boolean;
   insertionMethod: Nullable<string>;
   typingSpeedMs: Nullable<number>;
+  pillTheme: Nullable<string>;
 };
 
 // Normalize post-processing mode for backwards compatibility
@@ -66,6 +73,37 @@ const normalizePostProcessingMode = (
   }
   // "ollama" or any other unknown mode falls back to "none"
   return "none";
+};
+
+const parsePillTheme = (raw: Nullable<string>): PillTheme => {
+  if (!raw) {
+    return DEFAULT_PILL_THEME;
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<PillTheme>;
+    return {
+      waveStyle: PILL_WAVE_STYLES.includes(parsed.waveStyle as PillWaveStyle)
+        ? (parsed.waveStyle as PillWaveStyle)
+        : DEFAULT_PILL_THEME.waveStyle,
+      accentColor:
+        typeof parsed.accentColor === "string" &&
+        /^#[0-9a-fA-F]{6}$/.test(parsed.accentColor)
+          ? parsed.accentColor
+          : DEFAULT_PILL_THEME.accentColor,
+      glow: parsed.glow === true,
+      scale:
+        typeof parsed.scale === "number" && Number.isFinite(parsed.scale)
+          ? Math.min(1.5, Math.max(0.75, parsed.scale))
+          : DEFAULT_PILL_THEME.scale,
+      effect: PILL_COMPLETION_EFFECTS.includes(
+        parsed.effect as PillCompletionEffect,
+      )
+        ? (parsed.effect as PillCompletionEffect)
+        : DEFAULT_PILL_THEME.effect,
+    };
+  } catch {
+    return DEFAULT_PILL_THEME;
+  }
 };
 
 const fromLocalPreferences = (
@@ -111,6 +149,7 @@ const fromLocalPreferences = (
   menuBarIconHidden: preferences.menuBarIconHidden ?? false,
   insertionMethod: preferences.insertionMethod ?? null,
   typingSpeedMs: preferences.typingSpeedMs ?? null,
+  pillTheme: parsePillTheme(preferences.pillTheme),
 });
 
 const toLocalPreferences = (
@@ -158,6 +197,7 @@ const toLocalPreferences = (
   menuBarIconHidden: preferences.menuBarIconHidden ?? false,
   insertionMethod: preferences.insertionMethod ?? null,
   typingSpeedMs: preferences.typingSpeedMs ?? null,
+  pillTheme: JSON.stringify(preferences.pillTheme),
 });
 
 export abstract class BaseUserPreferencesRepo extends BaseRepo {

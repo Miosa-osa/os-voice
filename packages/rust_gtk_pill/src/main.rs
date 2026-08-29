@@ -4,6 +4,7 @@ mod input;
 mod ipc;
 mod pill;
 mod state;
+mod theme;
 mod x11;
 
 fn main() {

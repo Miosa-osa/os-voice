@@ -73,6 +73,18 @@ pub enum InMessage {
     Fireworks { message: String },
     Flame { message: String },
     FlashBlue,
+    Theme {
+        #[serde(default)]
+        wave_style: String,
+        #[serde(default)]
+        accent_color: String,
+        #[serde(default)]
+        glow: bool,
+        #[serde(default = "default_theme_scale")]
+        scale: f64,
+        #[serde(default)]
+        effect: String,
+    },
     BroadcastTranscript { text: String },
     AssistantState {
         active: bool,
@@ -85,6 +97,10 @@ pub enum InMessage {
         permissions: Vec<PillPermission>,
     },
     Quit,
+}
+
+fn default_theme_scale() -> f64 {
+    1.0
 }
 
 #[derive(Debug, Serialize)]

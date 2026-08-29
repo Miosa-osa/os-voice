@@ -1,6 +1,7 @@
 use std::cell::{Cell, RefCell};
 
 use crate::ipc::{Phase, PillMessage, PillPermission, PillStreaming, Visibility};
+use crate::theme::Theme;
 
 use crate::constants::*;
 
@@ -180,6 +181,11 @@ pub(crate) struct PillState {
     pub(crate) flame_active: Cell<bool>,
     pub(crate) flame_elapsed: Cell<f64>,
     pub(crate) flame_tongues: RefCell<Vec<FlameTongue>>,
+
+    // Theme + completion sparkle
+    pub(crate) theme: RefCell<Theme>,
+    pub(crate) sparkle_active: Cell<bool>,
+    pub(crate) sparkle_elapsed: Cell<f64>,
 
     // Flash blue border
     pub(crate) flash_blue_active: Cell<bool>,

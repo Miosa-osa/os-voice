@@ -1919,6 +1919,11 @@ pub fn notify_pill_style_info(app: AppHandle, count: u32, name: String) {
 }
 
 #[tauri::command]
+pub fn set_pill_theme(app: AppHandle, theme: serde_json::Value) {
+    crate::platform::overlay::notify_theme(&app, &theme);
+}
+
+#[tauri::command]
 #[specta::specta]
 pub fn start_key_listener(app: AppHandle) -> Result<(), String> {
     crate::platform::keyboard::start_key_listener(&app)

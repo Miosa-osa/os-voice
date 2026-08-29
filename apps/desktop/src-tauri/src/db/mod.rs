@@ -19,6 +19,7 @@ pub const DICTATION_EVENTS_MIGRATION_SQL: &str =
     include_str!("migrations/069_dictation_events.sql");
 pub const TERMS_DEFINITIONS_MIGRATION_SQL: &str =
     include_str!("migrations/070_terms_definitions.sql");
+pub const PILL_THEME_MIGRATION_SQL: &str = include_str!("migrations/071_pill_theme.sql");
 pub const USER_PROFILES_MIGRATION_SQL: &str = include_str!("migrations/001_user_profiles.sql");
 pub const TRANSCRIPTIONS_MIGRATION_SQL: &str = include_str!("migrations/002_transcriptions.sql");
 pub const TERMS_MIGRATION_SQL: &str = include_str!("migrations/003_terms.sql");
@@ -555,6 +556,12 @@ pub fn migrations() -> Vec<tauri_plugin_sql::Migration> {
             version: 70,
             description: "add_terms_definitions",
             sql: TERMS_DEFINITIONS_MIGRATION_SQL,
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
+        tauri_plugin_sql::Migration {
+            version: 71,
+            description: "add_pill_theme",
+            sql: PILL_THEME_MIGRATION_SQL,
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
     ]

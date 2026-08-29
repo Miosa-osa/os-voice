@@ -6,6 +6,7 @@ use crate::ipc::{Phase, PillPermission, PillStreaming};
 
 use crate::constants::*;
 use crate::state::{ClickAction, ClickRegion, PillState, RocketPhase};
+use crate::theme::{Theme, WaveStyle};
 
 pub(crate) fn draw_all(cr: &cairo::Context, state: &PillState) {
     cr.set_operator(cairo::Operator::Source);
@@ -48,6 +49,10 @@ pub(crate) fn draw_all(cr: &cairo::Context, state: &PillState) {
             draw_fireworks(cr, state, ww, wh);
         }
 
+        if state.sparkle_active.get() {
+            draw_sparkle(cr, state, ww, wh);
+        }
+
         if state.flash_t.get() > 0.01 {
             draw_flash_message(cr, state, ww, wh);
         }
@@ -64,8 +69,9 @@ pub(crate) fn draw_all(cr: &cairo::Context, state: &PillState) {
 
 pub(crate) fn pill_position(state: &PillState, ww: f64, wh: f64) -> (f64, f64, f64, f64) {
     let expand_t = state.expand_t.get();
-    let pill_w = lerp(MIN_PILL_WIDTH, EXPANDED_PILL_WIDTH, expand_t);
-    let pill_h = lerp(MIN_PILL_HEIGHT, EXPANDED_PILL_HEIGHT, expand_t);
+    let scale = state.theme.borrow().scale;
+    let pill_w = lerp(MIN_PILL_WIDTH, EXPANDED_PILL_WIDTH * scale, expand_t);
+    let pill_h = lerp(MIN_PILL_HEIGHT, EXPANDED_PILL_HEIGHT * scale, expand_t);
     let pill_x = (ww - pill_w) / 2.0;
 
     let pill_y = if state.assistant_active.get() || state.panel_open_t.get() > 0.01 {
@@ -93,18 +99,35 @@ fn draw_pill(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64) {
         return;
     }
 
+    let theme = state.theme.borrow().clone();
+    let (ar, ag, ab) = theme.accent;
+
+    if theme.glow && expand_t > 0.1 {
+        for (spread, alpha) in [(6.0, 0.06), (4.0, 0.12), (2.0, 0.2)] {
+            rounded_rect(cr, rx - spread, ry - spread, pill_w + spread * 2.0, pill_h + spread * 2.0, radius + spread);
+            cr.set_source_rgba(ar, ag, ab, alpha * expand_t);
+            let _ = cr.fill();
+        }
+    }
+
     rounded_rect(cr, rx, ry, pill_w, pill_h, radius);
     cr.set_source_rgba(0.0, 0.0, 0.0, bg_alpha);
     let _ = cr.fill();
 
     rounded_rect(cr, rx + 0.5, ry + 0.5, pill_w - 1.0, pill_h - 1.0, radius - 0.5);
-    cr.set_source_rgba(1.0, 1.0, 1.0, BORDER_ALPHA);
+    cr.set_source_rgba(ar, ag, ab, BORDER_ALPHA);
     cr.set_line_width(1.0);
     let _ = cr.stroke();
 
     match state.phase.get() {
         Phase::Recording if expand_t > 0.1 => {
-            draw_waveform(cr, rx, ry, pill_w, pill_h, expand_t, state);
+            match theme.wave_style {
+                WaveStyle::Classic => draw_waveform(cr, rx, ry, pill_w, pill_h, expand_t, state, &theme),
+                WaveStyle::Ribbon => draw_waveform_ribbon(cr, rx, ry, pill_w, pill_h, expand_t, state, &theme),
+                WaveStyle::Bars => draw_waveform_bars(cr, rx, ry, pill_w, pill_h, expand_t, state, &theme),
+                WaveStyle::Pulse => draw_waveform_pulse(cr, rx, ry, pill_w, pill_h, expand_t, state, &theme),
+                WaveStyle::Minimal => draw_waveform_minimal(cr, rx, ry, pill_w, pill_h, expand_t, state, &theme),
+            }
             draw_edge_gradient(cr, rx, ry, pill_w, pill_h, radius, expand_t);
         }
         Phase::Loading if expand_t > 0.1 => {
@@ -122,46 +145,167 @@ fn draw_pill(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64) {
     });
 }
 
+fn trace_sine(cr: &cairo::Context, rx: f64, pill_w: f64, baseline: f64, amplitude: f64, frequency: f64, phase: f64) {
+    let segments = (pill_w / 2.0).max(72.0) as i32;
+    for i in 0..=segments {
+        let t = i as f64 / segments as f64;
+        let x = rx + pill_w * t;
+        let y = baseline + amplitude * (frequency * t * TAU + phase).sin();
+        if i == 0 {
+            cr.move_to(x, y);
+        } else {
+            cr.line_to(x, y);
+        }
+    }
+}
+
+fn begin_wave_clip(cr: &cairo::Context, rx: f64, ry: f64, pill_w: f64, pill_h: f64) {
+    cr.save().ok();
+    rounded_rect(cr, rx, ry, pill_w, pill_h, pill_h / 2.0);
+    cr.clip();
+    cr.set_line_cap(cairo::LineCap::Round);
+    cr.set_line_join(cairo::LineJoin::Round);
+}
+
 fn draw_waveform(
     cr: &cairo::Context, rx: f64, ry: f64, pill_w: f64, pill_h: f64,
-    expand_t: f64, state: &PillState,
+    expand_t: f64, state: &PillState, theme: &Theme,
 ) {
     let wave_phase = state.wave_phase.get();
     let level = state.current_level.get();
     let baseline = ry + pill_h / 2.0;
+    let (r, g, b) = theme.accent;
 
-    cr.save().ok();
-    rounded_rect(cr, rx, ry, pill_w, pill_h, pill_h / 2.0);
-    cr.clip();
-
+    begin_wave_clip(cr, rx, ry, pill_w, pill_h);
     for config in WAVE_CONFIGS {
         let amplitude_factor = (level * config.multiplier).clamp(MIN_AMPLITUDE, MAX_AMPLITUDE);
         let amplitude = (pill_h * 0.75 * amplitude_factor).max(1.0);
-        let phase = wave_phase + config.phase_offset;
-        let alpha = config.opacity * expand_t;
-
-        cr.set_source_rgba(1.0, 1.0, 1.0, alpha);
+        cr.set_source_rgba(r, g, b, config.opacity * expand_t);
         cr.set_line_width(STROKE_WIDTH);
-        cr.set_line_cap(cairo::LineCap::Round);
-        cr.set_line_join(cairo::LineJoin::Round);
-
-        let segments = (pill_w / 2.0).max(72.0) as i32;
-        for i in 0..=segments {
-            let t = i as f64 / segments as f64;
-            let x = rx + pill_w * t;
-            let theta = config.frequency * t * TAU + phase;
-            let y = baseline + amplitude * theta.sin();
-
-            if i == 0 {
-                cr.move_to(x, y);
-            } else {
-                cr.line_to(x, y);
-            }
-        }
+        trace_sine(cr, rx, pill_w, baseline, amplitude, config.frequency, wave_phase + config.phase_offset);
         let _ = cr.stroke();
     }
-
     cr.restore().ok();
+}
+
+fn draw_waveform_ribbon(
+    cr: &cairo::Context, rx: f64, ry: f64, pill_w: f64, pill_h: f64,
+    expand_t: f64, state: &PillState, theme: &Theme,
+) {
+    let wave_phase = state.wave_phase.get();
+    let level = state.current_level.get();
+    let baseline = ry + pill_h / 2.0;
+    let (r, g, b) = theme.accent;
+    let amplitude = (pill_h * 0.7 * (level * 1.5).clamp(MIN_AMPLITUDE, MAX_AMPLITUDE)).max(1.0);
+
+    begin_wave_clip(cr, rx, ry, pill_w, pill_h);
+    trace_sine(cr, rx, pill_w, baseline, amplitude, 0.9, wave_phase);
+    cr.line_to(rx + pill_w, ry + pill_h);
+    cr.line_to(rx, ry + pill_h);
+    cr.close_path();
+    cr.set_source_rgba(r, g, b, 0.18 * expand_t);
+    let _ = cr.fill();
+
+    for (frequency, phase_offset, width, alpha) in [(0.9, 0.0, 3.0, 0.95), (1.1, 1.2, 2.0, 0.5)] {
+        cr.set_source_rgba(r, g, b, alpha * expand_t);
+        cr.set_line_width(width);
+        trace_sine(cr, rx, pill_w, baseline, amplitude, frequency, wave_phase + phase_offset);
+        let _ = cr.stroke();
+    }
+    cr.restore().ok();
+}
+
+fn draw_waveform_bars(
+    cr: &cairo::Context, rx: f64, ry: f64, pill_w: f64, pill_h: f64,
+    expand_t: f64, state: &PillState, theme: &Theme,
+) {
+    let wave_phase = state.wave_phase.get();
+    let level = state.current_level.get();
+    let (r, g, b) = theme.accent;
+    let bar_w = 3.0;
+    let gap = 3.0;
+    let count = ((pill_w - gap) / (bar_w + gap)).floor().max(3.0) as usize;
+    let span = count as f64 * (bar_w + gap) - gap;
+    let start_x = rx + (pill_w - span) / 2.0 + bar_w / 2.0;
+    let center_y = ry + pill_h / 2.0;
+
+    begin_wave_clip(cr, rx, ry, pill_w, pill_h);
+    cr.set_source_rgba(r, g, b, 0.95 * expand_t);
+    cr.set_line_width(bar_w);
+    for i in 0..count {
+        let ripple = 0.55 + 0.45 * (wave_phase * 2.0 + i as f64 * 0.7).sin();
+        let height = (pill_h * 0.8 * (level * 1.4 * ripple).clamp(0.08, 1.0)).max(bar_w);
+        let x = start_x + i as f64 * (bar_w + gap);
+        cr.move_to(x, center_y - height / 2.0);
+        cr.line_to(x, center_y + height / 2.0);
+        let _ = cr.stroke();
+    }
+    cr.restore().ok();
+}
+
+fn draw_waveform_pulse(
+    cr: &cairo::Context, rx: f64, ry: f64, pill_w: f64, pill_h: f64,
+    expand_t: f64, state: &PillState, theme: &Theme,
+) {
+    let wave_phase = state.wave_phase.get();
+    let level = state.current_level.get();
+    let (r, g, b) = theme.accent;
+    let cx = rx + pill_w / 2.0;
+    let cy = ry + pill_h / 2.0;
+    let max_radius = pill_w * 0.45;
+
+    begin_wave_clip(cr, rx, ry, pill_w, pill_h);
+    for i in 0..3 {
+        let progress = (wave_phase / TAU + i as f64 / 3.0) % 1.0;
+        let radius = pill_h * 0.2 + progress * max_radius;
+        let alpha = (1.0 - progress) * (0.25 + 0.6 * level) * expand_t;
+        cr.set_source_rgba(r, g, b, alpha);
+        cr.set_line_width(1.5);
+        cr.arc(cx, cy, radius, 0.0, TAU);
+        let _ = cr.stroke();
+    }
+    cr.set_source_rgba(r, g, b, expand_t);
+    cr.arc(cx, cy, 2.5 + level * (pill_h * 0.25), 0.0, TAU);
+    let _ = cr.fill();
+    cr.restore().ok();
+}
+
+fn draw_waveform_minimal(
+    cr: &cairo::Context, rx: f64, ry: f64, pill_w: f64, pill_h: f64,
+    expand_t: f64, state: &PillState, theme: &Theme,
+) {
+    let wave_phase = state.wave_phase.get();
+    let level = state.current_level.get();
+    let baseline = ry + pill_h / 2.0;
+    let (r, g, b) = theme.accent;
+    let amplitude = (pill_h * 0.45 * (level * 1.4).clamp(MIN_AMPLITUDE, MAX_AMPLITUDE)).max(0.8);
+
+    begin_wave_clip(cr, rx, ry, pill_w, pill_h);
+    cr.set_source_rgba(r, g, b, 0.9 * expand_t);
+    cr.set_line_width(1.2);
+    trace_sine(cr, rx, pill_w, baseline, amplitude, 1.0, wave_phase);
+    let _ = cr.stroke();
+    cr.restore().ok();
+}
+
+fn draw_sparkle(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64) {
+    let progress = (state.sparkle_elapsed.get() / SPARKLE_DURATION).clamp(0.0, 1.0);
+    let (rx, ry, pill_w, pill_h) = pill_position(state, ww, wh);
+    let cx = rx + pill_w / 2.0;
+    let cy = ry + pill_h / 2.0;
+    let (r, g, b) = state.theme.borrow().accent;
+    let eased = 1.0 - (1.0 - progress).powi(3);
+    let radius = pill_w * 0.3 + eased * 42.0;
+    let alpha = 1.0 - progress;
+
+    for i in 0..SPARKLE_COUNT {
+        let angle = i as f64 / SPARKLE_COUNT as f64 * TAU + 0.3;
+        let x = cx + radius * angle.cos();
+        let y = cy + radius * 0.6 * angle.sin();
+        cr.set_source_rgba(r, g, b, alpha);
+        cr.arc(x, y, 1.0 + 2.5 * alpha, 0.0, TAU);
+        let _ = cr.fill();
+    }
 }
 
 fn draw_edge_gradient(
@@ -206,8 +350,8 @@ fn draw_loading(
     let track_x = rx + pad;
     let track_w = pill_w - pad * 2.0;
 
-    // Track line
-    cr.set_source_rgba(1.0, 1.0, 1.0, 0.15 * expand_t);
+    let (r, g, b) = state.theme.borrow().accent;
+    cr.set_source_rgba(r, g, b, 0.15 * expand_t);
     cr.rectangle(track_x, bar_y, track_w, bar_h);
     let _ = cr.fill();
 
@@ -219,7 +363,7 @@ fn draw_loading(
     let draw_left = ind_x.max(track_x);
     let draw_right = (ind_x + indicator_w).min(track_x + track_w);
     if draw_right > draw_left {
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.7 * expand_t);
+        cr.set_source_rgba(r, g, b, 0.7 * expand_t);
         cr.rectangle(draw_left, bar_y, draw_right - draw_left, bar_h);
         let _ = cr.fill();
     }
