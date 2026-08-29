@@ -20,10 +20,14 @@ const SILENCE_FRAME_SECS: f32 = 0.1;
 // Plosive closures and inter-word gaps are well under 200 ms; only a sustained
 // pause is a safe place to cut.
 const SILENCE_RUN_FRAMES: usize = 4;
-const MIN_TAIL_SECS: f32 = 0.3;
-const SILENCE_FLOOR: f32 = 0.004;
+const MIN_TAIL_SECS: f32 = 0.5;
+// Quiet microphones produce speech well below 0.01 RMS, so the cut threshold
+// is relative to the buffer's own level and a segment only counts as silent
+// when it is essentially digital silence (muted or disconnected input).
+const SILENCE_FLOOR: f32 = 0.0008;
 const SILENCE_RATIO: f32 = 0.15;
-const CONTEXT_TAIL_CHARS: usize = 300;
+const DIGITAL_SILENCE_PEAK: f32 = 0.0002;
+const CONTEXT_TAIL_CHARS: usize = 160;
 
 pub type SegmentResult = Result<TranscriptionOutput, ApiError>;
 
@@ -245,7 +249,7 @@ fn is_silent(samples: &[f32], sample_rate: u32) -> bool {
         .chunks(frame_len)
         .map(frame_rms)
         .fold(0.0f32, f32::max);
-    loudest < SILENCE_FLOOR * 2.0
+    loudest < DIGITAL_SILENCE_PEAK
 }
 
 /// Returns the sample index to cut a segment at, or None if the buffer should
@@ -348,8 +352,17 @@ mod tests {
 
     #[test]
     fn detects_silent_segments() {
-        assert!(is_silent(&tone(2.0, 0.001), RATE));
+        assert!(is_silent(&tone(2.0, 0.0001), RATE));
+        assert!(!is_silent(&tone(2.0, 0.0005), RATE));
         assert!(!is_silent(&tone(2.0, 0.1), RATE));
+    }
+
+    #[test]
+    fn quiet_speech_still_cuts_at_pauses() {
+        let mut audio = tone(9.0, 0.006);
+        audio.extend(tone(0.6, 0.0));
+        audio.extend(tone(2.0, 0.006));
+        assert!(find_cut_point(&audio, RATE).is_some());
     }
 
     #[test]

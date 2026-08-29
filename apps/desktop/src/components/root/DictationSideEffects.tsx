@@ -111,6 +111,9 @@ type RawStopResp = {
   abortMessage?: string;
 };
 
+// Two triggers within this window are one bounced press, not start + stop.
+const MIN_DICTATION_MS = 700;
+
 export const DictationSideEffects = () => {
   const intl = useIntl();
 
@@ -644,6 +647,11 @@ export const DictationSideEffects = () => {
   }, [startRecording]);
 
   const stopDictationRecording = useCallback(async () => {
+    const startedAt = getAppState().local.lastDictatedAt ?? 0;
+    if (Date.now() - startedAt < MIN_DICTATION_MS) {
+      getLogger().info("Ignoring stop right after start (bounced trigger)");
+      return;
+    }
     getLogger().info("Stopping dictation recording");
     await stopRecording();
   }, [stopRecording]);

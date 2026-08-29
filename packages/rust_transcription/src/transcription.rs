@@ -119,6 +119,7 @@ impl TranscriptionEngine {
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
         params.set_no_context(true);
+        params.set_suppress_nst(true);
 
         if let Some(language) = input
             .language
