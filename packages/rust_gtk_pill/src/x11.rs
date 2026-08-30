@@ -173,48 +173,80 @@ pub(crate) fn setup_x11_window(window: &gtk::Window, placement: Rc<Cell<Placemen
         XFlush(xdisplay);
     }
 
-    // The proxy is rebuilt on demand: at login the pill usually starts before
-    // gnome-shell has loaded the extension, and the extension can be reloaded
-    // at any time. Caching a single failed proxy would strand the pill on the
-    // XQueryPointer fallback, which is frozen whenever the cursor sits over a
-    // Wayland-native window.
-    let pointer_state: RefCell<(Option<gtk::gio::DBusProxy>, Instant)> =
-        RefCell::new((pointer_watch_proxy(), Instant::now()));
-    let cursor_pos = move || -> (c_int, c_int) {
-        {
-            let mut state = pointer_state.borrow_mut();
-            if state.0.is_none() && state.1.elapsed() >= POINTER_RETRY_INTERVAL {
-                state.1 = Instant::now();
-                state.0 = pointer_watch_proxy();
-                if state.0.is_some() {
-                    eprintln!("[pill] pointer-watch service acquired");
-                }
+    // The cursor position is fetched ASYNCHRONOUSLY. A synchronous DBus call
+    // on the GTK main thread blocks rendering whenever gnome-shell is busy —
+    // the call times out and the pill visibly freezes mid-animation. Here the
+    // timer only ever reads the last delivered value, so drawing never waits
+    // on the compositor. The proxy is also rebuilt on demand because at login
+    // the pill starts before gnome-shell has loaded the extension.
+    let pointer_cache: Rc<Cell<Option<(c_int, c_int)>>> = Rc::new(Cell::new(None));
+    let pointer_inflight: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+    let pointer_proxy: Rc<RefCell<Option<gtk::gio::DBusProxy>>> =
+        Rc::new(RefCell::new(pointer_watch_proxy()));
+    let pointer_retry: Rc<Cell<Instant>> = Rc::new(Cell::new(
+        Instant::now() - POINTER_RETRY_INTERVAL,
+    ));
+
+    let refresh_pointer = {
+        let cache = pointer_cache.clone();
+        let inflight = pointer_inflight.clone();
+        let proxy_cell = pointer_proxy.clone();
+        let retry = pointer_retry.clone();
+        move || {
+            if inflight.get() {
+                return;
             }
-            let call = state.0.as_ref().map(|proxy| {
-                proxy.call_sync(
-                    "GetPointer",
-                    None,
-                    gtk::gio::DBusCallFlags::NONE,
-                    100,
-                    None::<&gtk::gio::Cancellable>,
-                )
-            });
-            match call {
-                Some(Ok(value)) => {
-                    if let Some((x, y)) = value.get::<(i32, i32)>() {
-                        return (x, y);
+            let proxy = {
+                let mut guard = proxy_cell.borrow_mut();
+                if guard.is_none() && retry.get().elapsed() >= POINTER_RETRY_INTERVAL {
+                    retry.set(Instant::now());
+                    *guard = pointer_watch_proxy();
+                    if guard.is_some() {
+                        eprintln!("[pill] pointer-watch service acquired");
                     }
-                    eprintln!("[pill] pointer-watch returned an unexpected reply");
-                    state.0 = None;
-                    state.1 = Instant::now();
                 }
-                Some(Err(err)) => {
-                    eprintln!("[pill] pointer-watch unavailable ({err}); using X11 cursor");
-                    state.0 = None;
-                    state.1 = Instant::now();
-                }
-                None => {}
-            }
+                guard.clone()
+            };
+            let Some(proxy) = proxy else {
+                return;
+            };
+            inflight.set(true);
+            let cache = cache.clone();
+            let inflight = inflight.clone();
+            let proxy_cell = proxy_cell.clone();
+            let retry = retry.clone();
+            proxy.call(
+                "GetPointer",
+                None,
+                gtk::gio::DBusCallFlags::NONE,
+                1000,
+                None::<&gtk::gio::Cancellable>,
+                move |result| {
+                    inflight.set(false);
+                    match result {
+                        Ok(value) => match value.get::<(i32, i32)>() {
+                            Some((x, y)) => cache.set(Some((x as c_int, y as c_int))),
+                            None => {
+                                eprintln!("[pill] pointer-watch sent an unexpected reply");
+                                *proxy_cell.borrow_mut() = None;
+                                retry.set(Instant::now());
+                            }
+                        },
+                        Err(err) => {
+                            eprintln!("[pill] pointer-watch call failed ({err}); using X11 cursor");
+                            *proxy_cell.borrow_mut() = None;
+                            retry.set(Instant::now());
+                        }
+                    }
+                },
+            );
+        }
+    };
+
+    let cursor_pos = move || -> (c_int, c_int) {
+        refresh_pointer();
+        if let Some(position) = pointer_cache.get() {
+            return position;
         }
         unsafe {
             let root = XDefaultRootWindow(xdisplay);
