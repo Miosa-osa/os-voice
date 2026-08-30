@@ -1,13 +1,15 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::ffi::{c_int, c_ulong, c_void};
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gtk::gdk;
 use gtk::glib::{self, ControlFlow};
 use gtk::prelude::*;
 
 use crate::constants::MARGIN_BOTTOM;
+
+const POINTER_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 use crate::theme::{Placement, Position};
 
 // In a Wayland session the pill runs through XWayland, where GNOME's dock
@@ -171,20 +173,47 @@ pub(crate) fn setup_x11_window(window: &gtk::Window, placement: Rc<Cell<Placemen
         XFlush(xdisplay);
     }
 
-    let pointer_proxy = pointer_watch_proxy();
+    // The proxy is rebuilt on demand: at login the pill usually starts before
+    // gnome-shell has loaded the extension, and the extension can be reloaded
+    // at any time. Caching a single failed proxy would strand the pill on the
+    // XQueryPointer fallback, which is frozen whenever the cursor sits over a
+    // Wayland-native window.
+    let pointer_state: RefCell<(Option<gtk::gio::DBusProxy>, Instant)> =
+        RefCell::new((pointer_watch_proxy(), Instant::now()));
     let cursor_pos = move || -> (c_int, c_int) {
-        if let Some(proxy) = &pointer_proxy {
-            let result = proxy.call_sync(
-                "GetPointer",
-                None,
-                gtk::gio::DBusCallFlags::NONE,
-                50,
-                None::<&gtk::gio::Cancellable>,
-            );
-            if let Ok(value) = result {
-                if let Some((x, y)) = value.get::<(i32, i32)>() {
-                    return (x, y);
+        {
+            let mut state = pointer_state.borrow_mut();
+            if state.0.is_none() && state.1.elapsed() >= POINTER_RETRY_INTERVAL {
+                state.1 = Instant::now();
+                state.0 = pointer_watch_proxy();
+                if state.0.is_some() {
+                    eprintln!("[pill] pointer-watch service acquired");
                 }
+            }
+            let call = state.0.as_ref().map(|proxy| {
+                proxy.call_sync(
+                    "GetPointer",
+                    None,
+                    gtk::gio::DBusCallFlags::NONE,
+                    100,
+                    None::<&gtk::gio::Cancellable>,
+                )
+            });
+            match call {
+                Some(Ok(value)) => {
+                    if let Some((x, y)) = value.get::<(i32, i32)>() {
+                        return (x, y);
+                    }
+                    eprintln!("[pill] pointer-watch returned an unexpected reply");
+                    state.0 = None;
+                    state.1 = Instant::now();
+                }
+                Some(Err(err)) => {
+                    eprintln!("[pill] pointer-watch unavailable ({err}); using X11 cursor");
+                    state.0 = None;
+                    state.1 = Instant::now();
+                }
+                None => {}
             }
         }
         unsafe {
