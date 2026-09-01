@@ -231,15 +231,34 @@ export const postProcessTranscript = async ({
 
     const postprocessStart = performance.now();
     getLogger().verbose("Calling LLM for post-processing");
-    const genOutput = await genRepo.generateText({
-      system: ppSystem,
-      prompt: ppPrompt,
-      jsonResponse: {
-        name: "transcription_cleaning",
-        description: "JSON response with the processed transcription",
-        schema: PROCESSED_TRANSCRIPTION_JSON_SCHEMA,
-      },
-    });
+    // Post-processing only polishes an already-good transcription, so a
+    // failure here (an unreachable or renamed model, for instance) must never
+    // discard the text the user just dictated.
+    let genOutput: Awaited<ReturnType<typeof genRepo.generateText>>;
+    try {
+      genOutput = await genRepo.generateText({
+        system: ppSystem,
+        prompt: ppPrompt,
+        jsonResponse: {
+          name: "transcription_cleaning",
+          description: "JSON response with the processed transcription",
+          schema: PROCESSED_TRANSCRIPTION_JSON_SCHEMA,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      getLogger().warning(
+        `Post-processing failed, keeping the raw transcript (${message})`,
+      );
+      return {
+        transcript: rawTranscript,
+        warnings: dedup([
+          ...warnings,
+          `Post-processing failed, kept the raw transcript (${message})`,
+        ]),
+        metadata: { ...metadata, postProcessMode: "none" },
+      };
+    }
     const postprocessDuration = performance.now() - postprocessStart;
     metadata.postprocessDurationMs = Math.round(postprocessDuration);
 
