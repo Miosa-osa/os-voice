@@ -19,7 +19,7 @@ import { showErrorSnackbar, showSnackbar } from "../../actions/app.actions";
 import { closeFlagTranscriptionDialog } from "../../actions/transcriptions.actions";
 import { getTranscriptionRepo } from "../../repos";
 import { useAppStore } from "../../store";
-import { buildWaveFile, ensureFloat32Array } from "../../utils/audio.utils";
+import { buildWaveFile } from "../../utils/audio.utils";
 import { getEffectiveAuth } from "../../utils/auth.utils";
 import { AudioPlayerPill } from "./AudioPlayerPill";
 import { TranscriptionTextBlock } from "./TranscriptionTextBlock";
@@ -80,7 +80,7 @@ export const FlagTranscriptionDialog = () => {
         );
         sampleRate = audioData.sampleRate;
         const wavBuffer = buildWaveFile(
-          ensureFloat32Array(audioData.samples),
+          audioData.samples,
           audioData.sampleRate,
         );
 

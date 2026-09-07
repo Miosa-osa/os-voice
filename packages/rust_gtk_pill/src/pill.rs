@@ -11,6 +11,7 @@ use gtk_layer_shell::LayerShell;
 use crate::constants::*;
 use crate::ipc::{self, InMessage, OutMessage, Phase, Visibility};
 use crate::state::{FlameTongue, PillState, Rocket, RocketPhase, Spark, WindowMode};
+use crate::theme::{CompletionEffect, Placement, Theme, ThemeMessage};
 use crate::{draw, input, x11};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +33,7 @@ pub fn run(receiver: Receiver<InMessage>) {
         }
     };
 
+    let placement = Rc::new(Cell::new(Placement::default()));
     let window = gtk::Window::new(gtk::WindowType::Toplevel);
     if backend != Backend::PlainWayland {
         window.set_default_size(WINDOW_W_TYPING, WINDOW_H_TYPING);
@@ -57,7 +59,14 @@ pub fn run(receiver: Receiver<InMessage>) {
             window.set_namespace("voquill-pill");
         }
         Backend::X11 => {
-            window.connect_realize(move |window| x11::setup_x11_window(window));
+            let placement = placement.clone();
+            window.set_type_hint(gdk::WindowTypeHint::Dock);
+            window.set_skip_taskbar_hint(true);
+            window.set_skip_pager_hint(true);
+            window.set_keep_above(true);
+            window.set_accept_focus(false);
+            window.stick();
+            window.connect_realize(move |window| x11::setup_x11_window(window, placement.clone()));
         }
         Backend::PlainWayland => {
             window.set_type_hint(gdk::WindowTypeHint::Dock);
@@ -149,6 +158,13 @@ pub fn run(receiver: Receiver<InMessage>) {
         flash_is_error: Cell::new(false),
         flash_action: RefCell::new(None),
         flash_action_label: RefCell::new(None),
+        theme: RefCell::new(Theme::default()),
+        preview: Cell::new(false),
+        preview_clock: Cell::new(0.0),
+        rainbow_clock: Cell::new(0.0),
+        recording_started: Cell::new(None),
+        sparkle_active: Cell::new(false),
+        sparkle_elapsed: Cell::new(0.0),
         fireworks_active: Cell::new(false),
         fireworks_elapsed: Cell::new(0.0),
         fireworks_next_launch: Cell::new(0),
@@ -321,6 +337,7 @@ pub fn run(receiver: Receiver<InMessage>) {
     let quit_flag = Rc::new(Cell::new(false));
     let quit_tick = quit_flag.clone();
     let backend_tick = backend;
+    let placement_tick = placement.clone();
     glib::timeout_add_local(Duration::from_millis(16), move || {
         let rx = receiver.borrow();
         while let Ok(msg) = rx.try_recv() {
@@ -333,6 +350,76 @@ pub fn run(receiver: Receiver<InMessage>) {
                         state_tick.current_level.set(0.0);
                         state_tick.wave_phase.set(0.0);
                     }
+                    if phase == Phase::Idle && prev == Phase::Loading {
+                        trigger_completion_effect(&state_tick);
+                    }
+                    if phase == Phase::Recording && prev != Phase::Recording {
+                        state_tick.recording_started.set(Some(Instant::now()));
+                    } else if phase == Phase::Idle {
+                        state_tick.recording_started.set(None);
+                    }
+                }
+                InMessage::Theme {
+                    wave_style,
+                    accent_color,
+                    accent_color_2,
+                    background_color,
+                    background_alpha,
+                    border_width,
+                    roundness,
+                    speed,
+                    intensity,
+                    glow,
+                    scale,
+                    effect,
+                    position,
+                    bottom_offset,
+                    idle_opacity,
+                    idle_width,
+                    idle_label,
+                    show_timer,
+                    reactive_glow,
+                    loading_style,
+                    shadow,
+                    rainbow,
+                    border_color,
+                    rec_indicator,
+                    idle_shape,
+                    stroke_width,
+                    wave_opacity,
+                    preview,
+                } => {
+                    *state_tick.theme.borrow_mut() = Theme::from_message(ThemeMessage {
+                        wave_style: &wave_style,
+                        accent_color: &accent_color,
+                        accent_color_2: &accent_color_2,
+                        background_color: &background_color,
+                        background_alpha,
+                        border_width,
+                        roundness,
+                        speed,
+                        intensity,
+                        glow,
+                        scale,
+                        effect: &effect,
+                        position: &position,
+                        bottom_offset,
+                        idle_opacity,
+                        idle_width,
+                        idle_label: &idle_label,
+                        show_timer,
+                        reactive_glow,
+                        loading_style: &loading_style,
+                        shadow,
+                        rainbow,
+                        border_color: &border_color,
+                        rec_indicator,
+                        idle_shape: &idle_shape,
+                        stroke_width,
+                        wave_opacity,
+                    });
+                    placement_tick.set(state_tick.theme.borrow().placement());
+                    state_tick.preview.set(preview);
                 }
                 InMessage::Levels { levels } => {
                     *state_tick.pending_levels.borrow_mut() = levels;
@@ -506,11 +593,12 @@ pub fn run(receiver: Receiver<InMessage>) {
         }
 
         let visibility = state_tick.visibility.get();
-        let is_active = state_tick.phase.get() != Phase::Idle;
+        let previewing = state_tick.is_previewing();
+        let is_active = state_tick.phase.get() != Phase::Idle || previewing;
         let is_assistant = state_tick.assistant_active.get();
         let should_show = match backend_tick {
             Backend::LayerShell | Backend::PlainWayland => {
-                state_tick.phase.get() == Phase::Recording
+                state_tick.phase.get() == Phase::Recording || previewing
             }
             Backend::X11 => match visibility {
                 Visibility::Hidden => is_assistant,
@@ -580,15 +668,47 @@ pub fn run(receiver: Receiver<InMessage>) {
     main_loop.run();
 }
 
+fn trigger_completion_effect(state: &PillState) {
+    let effect = state.theme.borrow().effect;
+    match effect {
+        CompletionEffect::None => {}
+        CompletionEffect::Sparkle => {
+            state.sparkle_active.set(true);
+            state.sparkle_elapsed.set(0.0);
+        }
+        CompletionEffect::Fireworks => {
+            state.fireworks_active.set(true);
+            state.fireworks_elapsed.set(0.0);
+            state.fireworks_next_launch.set(0);
+            state.fireworks_rockets.borrow_mut().clear();
+        }
+    }
+}
+
 fn tick(state: &PillState) {
+    state.rainbow_clock.set((state.rainbow_clock.get() + SPRING_DT) % 1000.0);
+    if state.sparkle_active.get() {
+        let elapsed = state.sparkle_elapsed.get() + SPRING_DT;
+        state.sparkle_elapsed.set(elapsed);
+        if elapsed >= SPARKLE_DURATION {
+            state.sparkle_active.set(false);
+        }
+    }
+
     let phase = state.phase.get();
-    let is_active = phase != Phase::Idle;
+    let previewing = state.is_previewing();
+    let is_active = phase != Phase::Idle || previewing;
     let is_recording = phase == Phase::Recording;
     let is_loading = phase == Phase::Loading;
     let hovered = state.hovered.get();
 
     // Audio levels
-    if is_recording {
+    if previewing {
+        let clock = state.preview_clock.get() + SPRING_DT;
+        state.preview_clock.set(clock);
+        let synthetic = 0.4 + 0.25 * (clock * 2.3).sin() + 0.15 * (clock * 7.1).sin();
+        state.target_level.set(synthetic.clamp(0.1, 1.0));
+    } else if is_recording {
         let levels = state.pending_levels.borrow();
         if !levels.is_empty() {
             let sum: f64 = levels.iter().map(|v| *v as f64).sum();
@@ -621,7 +741,7 @@ fn tick(state: &PillState) {
     let level = state.current_level.get();
     let base_level = if is_loading && !is_recording { PROCESSING_BASE_LEVEL } else { 0.0 };
     let effective_level = level.max(base_level);
-    let advance = WAVE_BASE_PHASE_STEP + WAVE_PHASE_GAIN * effective_level;
+    let advance = (WAVE_BASE_PHASE_STEP + WAVE_PHASE_GAIN * effective_level) * state.theme.borrow().speed;
     state.wave_phase.set((state.wave_phase.get() + advance) % TAU);
 
     // Pill expand/collapse (spring)

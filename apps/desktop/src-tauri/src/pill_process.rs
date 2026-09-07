@@ -132,6 +132,45 @@ pub fn notify_style_info(app: &tauri::AppHandle, count: u32, name: &str) {
     }
 }
 
+pub fn notify_theme(app: &tauri::AppHandle, theme: &serde_json::Value) {
+    if let Some(pill) = app.try_state::<std::sync::Arc<PillProcess>>() {
+        let message = serde_json::json!({
+            "type": "theme",
+            "wave_style": theme.get("waveStyle").cloned().unwrap_or_default(),
+            "accent_color": theme.get("accentColor").cloned().unwrap_or_default(),
+            "accent_color_2": theme.get("accentColor2").and_then(|v| v.as_str()).unwrap_or(""),
+            "background_color": theme.get("backgroundColor").cloned().unwrap_or_default(),
+            "background_alpha": theme.get("backgroundAlpha").and_then(|v| v.as_f64()).unwrap_or(1.0),
+            "border_width": theme.get("borderWidth").and_then(|v| v.as_f64()).unwrap_or(1.0),
+            "roundness": theme.get("roundness").and_then(|v| v.as_f64()).unwrap_or(1.0),
+            "speed": theme.get("speed").and_then(|v| v.as_f64()).unwrap_or(1.0),
+            "intensity": theme.get("intensity").and_then(|v| v.as_f64()).unwrap_or(1.0),
+            "glow": theme.get("glow").and_then(|v| v.as_bool()).unwrap_or(false),
+            "scale": theme.get("scale").and_then(|v| v.as_f64()).unwrap_or(1.0),
+            "effect": theme.get("effect").cloned().unwrap_or_default(),
+            "position": theme.get("position").cloned().unwrap_or_default(),
+            "bottom_offset": theme.get("bottomOffset").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            "idle_opacity": theme.get("idleOpacity").and_then(|v| v.as_f64()).unwrap_or(1.0),
+            "idle_width": theme.get("idleWidth").and_then(|v| v.as_f64()).unwrap_or(1.0),
+            "idle_label": theme.get("idleLabel").cloned().unwrap_or_default(),
+            "show_timer": theme.get("showTimer").and_then(|v| v.as_bool()).unwrap_or(false),
+            "reactive_glow": theme.get("reactiveGlow").and_then(|v| v.as_bool()).unwrap_or(false),
+            "loading_style": theme.get("loadingStyle").cloned().unwrap_or_default(),
+            "shadow": theme.get("shadow").and_then(|v| v.as_bool()).unwrap_or(false),
+            "rainbow": theme.get("rainbow").and_then(|v| v.as_bool()).unwrap_or(false),
+            "border_color": theme.get("borderColor").and_then(|v| v.as_str()).unwrap_or(""),
+            "rec_indicator": theme.get("recIndicator").and_then(|v| v.as_bool()).unwrap_or(false),
+            "idle_shape": theme.get("idleShape").cloned().unwrap_or_default(),
+            "stroke_width": theme.get("strokeWidth").and_then(|v| v.as_f64()).unwrap_or(1.6),
+            "wave_opacity": theme.get("waveOpacity").and_then(|v| v.as_f64()).unwrap_or(1.0),
+            "preview": theme.get("preview").and_then(|v| v.as_bool()).unwrap_or(false),
+        });
+        if let Ok(json) = serde_json::to_string(&message) {
+            pill.send(&json);
+        }
+    }
+}
+
 pub fn notify_pill_window_size(app: &tauri::AppHandle, size: &PillWindowSize) {
     if let Some(pill) = app.try_state::<std::sync::Arc<PillProcess>>() {
         let size_str = match size {

@@ -9,6 +9,12 @@ pub(crate) const MARGIN_BOTTOM: i32 = 8;
 
 pub(crate) const PILL_AREA_HEIGHT: f64 = 48.0;
 
+// ── Theme ─────────────────────────────────────────────────────────
+pub(crate) const MIN_THEME_SCALE: f64 = 0.75;
+pub(crate) const MAX_THEME_SCALE: f64 = 1.5;
+pub(crate) const SPARKLE_DURATION: f64 = 0.9;
+pub(crate) const SPARKLE_COUNT: usize = 14;
+
 pub(crate) const MIN_PILL_WIDTH: f64 = 48.0;
 pub(crate) const MIN_PILL_HEIGHT: f64 = 6.0;
 pub(crate) const EXPANDED_PILL_WIDTH: f64 = 120.0;

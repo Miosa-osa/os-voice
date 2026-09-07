@@ -20,11 +20,25 @@ use sqlx::Row;
 
 use crate::platform::input::paste_text_into_focused_field as platform_paste_text;
 
-#[derive(serde::Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct StopRecordingResponse {
-    pub samples: Vec<f32>,
-    pub sample_rate: u32,
+// Audio crosses the IPC boundary as raw bytes rather than JSON number arrays:
+// a little-endian u32 sample rate followed by little-endian f32 samples.
+// JSON-encoding a long recording (tens of millions of samples) needed several
+// hundred megabytes per trip and crashed the webview.
+fn encode_audio_payload(samples: &[f32], sample_rate: u32) -> tauri::ipc::Response {
+    let mut bytes = Vec::with_capacity(4 + samples.len() * 4);
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    for sample in samples {
+        bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+    tauri::ipc::Response::new(bytes)
+}
+
+fn decode_audio_samples(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .filter(|sample| sample.is_finite())
+        .collect()
 }
 
 #[derive(serde::Serialize, specta::Type)]
@@ -356,13 +370,6 @@ pub struct UserPreferencesGetArgs {
 
 const MAX_RETAINED_TRANSCRIPTION_AUDIO: usize = 20;
 
-#[derive(serde::Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct TranscriptionAudioData {
-    pub samples: Vec<f32>,
-    pub sample_rate: u32,
-}
-
 async fn delete_audio_entries(
     app: AppHandle,
     entries: Vec<(String, String)>,
@@ -524,10 +531,17 @@ fn detect_apple_gpu_name() -> Option<String> {
         .map(|g| g.name)
 }
 
-/// Best-effort NVIDIA GPU snapshot via `nvidia-smi`. Returns
-/// (name, utilization %, VRAM used MB, VRAM total MB). Any failure — no NVIDIA
-/// GPU, tool missing, driver/library mismatch — yields None and never errors.
-fn query_nvidia_gpu() -> Option<(Option<String>, Option<f32>, Option<u64>, Option<u64>)> {
+#[derive(Default)]
+struct NvidiaGpuSnapshot {
+    name: Option<String>,
+    utilization_pct: Option<f32>,
+    vram_used_mb: Option<u64>,
+    vram_total_mb: Option<u64>,
+}
+
+/// Best-effort NVIDIA GPU snapshot via `nvidia-smi`.
+/// Missing tools, GPUs, or working drivers yield None.
+fn query_nvidia_gpu() -> Option<NvidiaGpuSnapshot> {
     let out = std::process::Command::new("nvidia-smi")
         .args([
             "--query-gpu=utilization.gpu,memory.used,memory.total,name",
@@ -552,7 +566,12 @@ fn query_nvidia_gpu() -> Option<(Option<String>, Option<f32>, Option<u64>, Optio
     } else {
         Some(parts[3].to_string())
     };
-    Some((name, util, used, total))
+    Some(NvidiaGpuSnapshot {
+        name,
+        utilization_pct: util,
+        vram_used_mb: used,
+        vram_total_mb: total,
+    })
 }
 
 #[tauri::command]
@@ -596,7 +615,7 @@ pub fn get_device_capability() -> DeviceCapability {
     let (vram_total_mb, unified_memory) = if is_apple {
         (Some((ram_gb * 1024.0) as u64), true)
     } else {
-        (query_nvidia_gpu().and_then(|(_, _, _, total)| total), false)
+        (query_nvidia_gpu().and_then(|gpu| gpu.vram_total_mb), false)
     };
 
     DeviceCapability {
@@ -654,17 +673,16 @@ pub fn get_live_system_stats() -> LiveSystemStats {
         };
     }
 
-    let (gpu_name, gpu_util_pct, vram_used_mb, vram_total_mb) =
-        query_nvidia_gpu().unwrap_or((None, None, None, None));
+    let gpu = query_nvidia_gpu().unwrap_or_default();
 
     LiveSystemStats {
         cpu_load_pct,
         ram_used_mb,
         ram_total_mb,
-        gpu_name,
-        gpu_util_pct,
-        vram_used_mb,
-        vram_total_mb,
+        gpu_name: gpu.name,
+        gpu_util_pct: gpu.utilization_pct,
+        vram_used_mb: gpu.vram_used_mb,
+        vram_total_mb: gpu.vram_total_mb,
         unified_memory: false,
     }
 }
@@ -933,12 +951,11 @@ pub async fn transcription_update(
 }
 
 #[tauri::command]
-#[specta::specta]
 pub async fn transcription_audio_load(
     app: AppHandle,
     id: String,
     database: State<'_, crate::state::OptionKeyDatabase>,
-) -> Result<TranscriptionAudioData, String> {
+) -> Result<tauri::ipc::Response, String> {
     let pool = database.pool();
 
     let audio_path: Option<String> = sqlx::query_scalar(
@@ -968,10 +985,7 @@ pub async fn transcription_audio_load(
     .await
     .map_err(|err| err.to_string())??;
 
-    Ok(TranscriptionAudioData {
-        samples,
-        sample_rate,
-    })
+    Ok(encode_audio_payload(&samples, sample_rate))
 }
 
 #[tauri::command]
@@ -1585,20 +1599,16 @@ pub async fn start_recording(
 }
 
 #[tauri::command]
-#[specta::specta]
 pub async fn stop_recording(
     _app: AppHandle,
     recorder: State<'_, Arc<dyn crate::platform::Recorder>>,
-) -> Result<StopRecordingResponse, String> {
+) -> Result<tauri::ipc::Response, String> {
     let recorder = Arc::clone(&recorder);
 
     tauri::async_runtime::spawn_blocking(move || match recorder.stop() {
         Ok(result) => {
             let audio = result.audio;
-            Ok(StopRecordingResponse {
-                samples: audio.samples,
-                sample_rate: audio.sample_rate,
-            })
+            Ok(encode_audio_payload(&audio.samples, audio.sample_rate))
         }
         Err(err) => {
             let not_recording = (*err)
@@ -1607,10 +1617,7 @@ pub async fn stop_recording(
                 .unwrap_or(false);
 
             if not_recording {
-                return Ok(StopRecordingResponse {
-                    samples: Vec::new(),
-                    sample_rate: 0,
-                });
+                return Ok(encode_audio_payload(&[], 0));
             }
 
             let message = err.to_string();
@@ -1623,23 +1630,30 @@ pub async fn stop_recording(
 }
 
 #[tauri::command]
-#[specta::specta]
 pub async fn store_transcription_audio(
     app: AppHandle,
-    id: String,
-    samples: Vec<f64>,
-    sample_rate: u32,
+    request: tauri::ipc::Request<'_>,
 ) -> Result<TranscriptionAudioSnapshot, String> {
+    let header = |name: &str| -> Result<String, String> {
+        request
+            .headers()
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string)
+            .ok_or_else(|| format!("Missing {name} header"))
+    };
+    let id = header("x-transcription-id")?;
+    let sample_rate: u32 = header("x-sample-rate")?
+        .parse()
+        .map_err(|_| "Invalid x-sample-rate header".to_string())?;
     if sample_rate == 0 {
         return Err("Audio sample rate must be greater than zero".to_string());
     }
 
-    let mut filtered = Vec::with_capacity(samples.len());
-    for sample in samples {
-        if sample.is_finite() {
-            filtered.push(sample as f32);
-        }
-    }
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("Expected raw audio bytes".to_string());
+    };
+    let filtered = decode_audio_samples(bytes);
 
     if filtered.is_empty() {
         return Err("No usable audio samples provided".to_string());
@@ -1913,6 +1927,11 @@ pub fn set_pill_visibility(app: AppHandle, visibility: String) {
 #[specta::specta]
 pub fn notify_pill_style_info(app: AppHandle, count: u32, name: String) {
     crate::platform::overlay::notify_style_info(&app, count, &name);
+}
+
+#[tauri::command]
+pub fn set_pill_theme(app: AppHandle, theme: serde_json::Value) {
+    crate::platform::overlay::notify_theme(&app, &theme);
 }
 
 #[tauri::command]

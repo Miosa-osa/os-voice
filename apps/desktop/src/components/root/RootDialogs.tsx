@@ -4,6 +4,7 @@ import { UpgradePlanDialog } from "../pricing/UpgradePlanDialog";
 import { AIAgentModeDialog } from "../settings/AIAgentModeDialog";
 import { AIPostProcessingDialog } from "../settings/AIPostProcessingDialog";
 import { AITranscriptionDialog } from "../settings/AITranscriptionDialog";
+import { AppearanceDialog } from "../settings/AppearanceDialog";
 import { AppKeybindingsDialog } from "../settings/AppKeybindingsDialog";
 import { AudioDialog } from "../settings/AudioDialog";
 import { ClearLocalDataDialog } from "../settings/ClearLocalDataDialog";
@@ -37,6 +38,7 @@ export const RootDialogs = () => {
       <PaymentDialog />
       <DeleteAccountDialog />
       <MoreSettingsDialog />
+      <AppearanceDialog />
       <MultiDeviceDialog />
       <DictationLanguageDialog />
       <AppKeybindingsDialog />

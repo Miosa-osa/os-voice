@@ -34,10 +34,20 @@ export type {
   LocalSidecarTranscribeOutput,
 } from "./local-transcription.sidecar";
 
+const GPU_RETRY_COOLDOWN_MS = 60_000;
+
 class LocalTranscriptionSidecarFacade {
   private cpuSidecar = new LocalTranscriptionSidecar("cpu");
   private gpuSidecar = new LocalTranscriptionSidecar("gpu");
-  private gpuUnavailable = false;
+  // A GPU failure used to be latched for the lifetime of the process, so one
+  // transient hiccup (a slow cold start while the machine is busy) degraded
+  // every later dictation to CPU -- tens of seconds instead of well under one.
+  // Back off instead, and let the GPU be retried once the cooldown passes.
+  private gpuUnavailableUntil = 0;
+
+  private get gpuUnavailable(): boolean {
+    return Date.now() < this.gpuUnavailableUntil;
+  }
 
   async listAvailableDevices(): Promise<LocalSidecarDevice[]> {
     await this.cpuSidecar.ensureStarted();
@@ -277,9 +287,11 @@ class LocalTranscriptionSidecarFacade {
   }
 
   private markGpuUnavailable(error: unknown): void {
-    this.gpuUnavailable = true;
+    this.gpuUnavailableUntil = Date.now() + GPU_RETRY_COOLDOWN_MS;
     getLogger().warning(
-      `[local-sidecar:gpu] unavailable, falling back to CPU (${toErrorMessage(error)})`,
+      `[local-sidecar:gpu] unavailable, using CPU for the next ${Math.round(
+        GPU_RETRY_COOLDOWN_MS / 1000,
+      )}s (${toErrorMessage(error)})`,
     );
   }
 }

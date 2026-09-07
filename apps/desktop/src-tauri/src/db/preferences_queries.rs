@@ -61,9 +61,10 @@ pub async fn upsert_user_preferences(
              dictation_audio_dim,
              menu_bar_icon_hidden,
              insertion_method,
-             typing_speed_ms
+             typing_speed_ms,
+             pill_theme
          )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40)
          ON CONFLICT(user_id) DO UPDATE SET
             transcription_mode = excluded.transcription_mode,
             transcription_api_key_id = excluded.transcription_api_key_id,
@@ -102,7 +103,8 @@ pub async fn upsert_user_preferences(
             dictation_audio_dim = excluded.dictation_audio_dim,
             menu_bar_icon_hidden = excluded.menu_bar_icon_hidden,
             insertion_method = excluded.insertion_method,
-            typing_speed_ms = excluded.typing_speed_ms",
+            typing_speed_ms = excluded.typing_speed_ms,
+            pill_theme = excluded.pill_theme",
     )
     .bind(&preferences.user_id)
     .bind(&preferences.transcription_mode)
@@ -143,6 +145,7 @@ pub async fn upsert_user_preferences(
     .bind(preferences.menu_bar_icon_hidden)
     .bind(&preferences.insertion_method)
     .bind(preferences.typing_speed_ms)
+    .bind(&preferences.pill_theme)
     .execute(&pool)
     .await?;
 
@@ -193,7 +196,8 @@ pub async fn fetch_user_preferences(
             dictation_audio_dim,
             menu_bar_icon_hidden,
             insertion_method,
-            typing_speed_ms
+            typing_speed_ms,
+            pill_theme
          FROM user_preferences
          WHERE user_id = ?1
          LIMIT 1",
@@ -327,6 +331,9 @@ pub async fn fetch_user_preferences(
             .unwrap_or(None),
         typing_speed_ms: row
             .try_get::<Option<i64>, _>("typing_speed_ms")
+            .unwrap_or(None),
+        pill_theme: row
+            .try_get::<Option<String>, _>("pill_theme")
             .unwrap_or(None),
     });
 

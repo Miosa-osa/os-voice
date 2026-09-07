@@ -35,6 +35,10 @@ pub fn notify_style_info(app: &tauri::AppHandle, count: u32, name: &str) {
     pill_process::notify_style_info(app, count, name);
 }
 
+pub fn notify_theme(app: &tauri::AppHandle, theme: &serde_json::Value) {
+    pill_process::notify_theme(app, theme);
+}
+
 pub fn notify_pill_window_size(app: &tauri::AppHandle, size: &PillWindowSize) {
     pill_process::notify_pill_window_size(app, size);
 }

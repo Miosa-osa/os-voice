@@ -22,10 +22,29 @@ const floatTo16BitPCM = (
   }
 };
 
-export const ensureFloat32Array = (
-  samples: number[] | Float32Array,
-): Float32Array =>
-  samples instanceof Float32Array ? samples : Float32Array.from(samples ?? []);
+export const ensureFloat32Array = (samples: AudioSamples): Float32Array =>
+  samples ?? new Float32Array(0);
+
+export type AudioPayload = {
+  samples: Float32Array;
+  sampleRate: number;
+};
+
+// Audio crosses the Tauri IPC boundary as raw bytes: a little-endian u32
+// sample rate followed by little-endian f32 samples (see commands.rs).
+export const decodeAudioPayload = (buffer: ArrayBuffer): AudioPayload => {
+  if (buffer.byteLength < 4) {
+    return { samples: new Float32Array(0), sampleRate: 0 };
+  }
+  const sampleRate = new DataView(buffer).getUint32(0, true);
+  return { samples: new Float32Array(buffer, 4), sampleRate };
+};
+
+export const encodeAudioSamples = (samples: Float32Array): Uint8Array =>
+  new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength);
+
+export const stopRecording = async (): Promise<AudioPayload> =>
+  decodeAudioPayload(await invoke<ArrayBuffer>("stop_recording"));
 
 export const buildWaveFile = (
   samples: Float32Array,
@@ -52,9 +71,6 @@ export const buildWaveFile = (
   floatTo16BitPCM(view, 44, samples);
   return buffer;
 };
-
-export const normalizeSamples = (samples: AudioSamples): number[] =>
-  Array.isArray(samples) ? samples : Array.from(samples ?? []);
 
 export type AudioClip =
   | "start_recording_clip"

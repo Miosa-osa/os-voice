@@ -119,6 +119,7 @@ impl TranscriptionEngine {
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
         params.set_no_context(true);
+        params.set_suppress_nst(true);
 
         if let Some(language) = input
             .language
@@ -429,7 +430,9 @@ fn list_gpu_devices() -> Result<Vec<ComputeDevice>, String> {
 #[cfg(feature = "gpu")]
 fn describe_gpu_device(device: whisper_rs::whisper_rs_sys::ggml_backend_dev_t) -> String {
     let description = unsafe {
-        c_string(whisper_rs::whisper_rs_sys::ggml_backend_dev_description(device))
+        c_string(whisper_rs::whisper_rs_sys::ggml_backend_dev_description(
+            device,
+        ))
     };
     let name = unsafe { c_string(whisper_rs::whisper_rs_sys::ggml_backend_dev_name(device)) };
     let backend = unsafe {

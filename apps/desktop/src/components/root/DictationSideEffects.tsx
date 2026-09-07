@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { AppTarget } from "@voquill/types";
+import { AppTarget, DEFAULT_PILL_THEME } from "@voquill/types";
 import { delayed } from "@voquill/utilities";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useIntl } from "react-intl";
@@ -56,7 +56,11 @@ import {
   trackDictationStart,
 } from "../../utils/analytics.utils";
 import { getIsAssistantModeEnabled } from "../../utils/assistant-mode.utils";
-import { playAlertSound, tryPlayAudioChime } from "../../utils/audio.utils";
+import {
+  playAlertSound,
+  stopRecording as stopRecordingCommand,
+  tryPlayAudioChime,
+} from "../../utils/audio.utils";
 import {
   DEFAULT_DICTATION_LIMIT_MINUTES,
   getDictationRecordingTimerDurations,
@@ -106,6 +110,9 @@ type RawStopResp = {
   shouldContinue: boolean;
   abortMessage?: string;
 };
+
+// Two triggers within this window are one bounced press, not start + stop.
+const MIN_DICTATION_MS = 700;
 
 export const DictationSideEffects = () => {
   const intl = useIntl();
@@ -292,7 +299,7 @@ export const DictationSideEffects = () => {
           getLogger().verbose("Invoking stop_recording and fetching a11y info");
           const [, outAudio, outA11yInfo, outAppTarget] = await Promise.all([
             strategyRef.current?.setPhase("loading"),
-            invoke<StopRecordingResponse>("stop_recording"),
+            stopRecordingCommand(),
             invoke<TextFieldInfo>("get_text_field_info").catch((error) => {
               getLogger().verbose(`Failed to get text field info: ${error}`);
               return null;
@@ -640,6 +647,11 @@ export const DictationSideEffects = () => {
   }, [startRecording]);
 
   const stopDictationRecording = useCallback(async () => {
+    const startedAt = getAppState().local.lastDictatedAt ?? 0;
+    if (Date.now() - startedAt < MIN_DICTATION_MS) {
+      getLogger().info("Ignoring stop right after start (bounced trigger)");
+      return;
+    }
     getLogger().info("Stopping dictation recording");
     await stopRecording();
   }, [stopRecording]);
@@ -876,6 +888,18 @@ export const DictationSideEffects = () => {
       console.error,
     );
   }, [pillVisibility]);
+
+  const pillTheme = useAppStore(
+    (state) => state.userPrefs?.pillTheme ?? DEFAULT_PILL_THEME,
+  );
+  const pillThemePreview = useAppStore(
+    (state) => state.settings.appearanceDialogOpen,
+  );
+  useEffect(() => {
+    invoke("set_pill_theme", {
+      theme: { ...pillTheme, preview: pillThemePreview },
+    }).catch(console.error);
+  }, [pillTheme, pillThemePreview]);
 
   const pillHasContent = useAppStore((state) => {
     if (!state.pillConversationId) return false;

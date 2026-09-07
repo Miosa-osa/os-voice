@@ -75,6 +75,8 @@ pub fn notify_style_info(app: &tauri::AppHandle, count: u32, name: &str) {
     }
 }
 
+pub fn notify_theme(_app: &tauri::AppHandle, _theme: &serde_json::Value) {}
+
 pub fn notify_pill_window_size(app: &tauri::AppHandle, size: &PillWindowSize) {
     if let Some(pill) = app.try_state::<std::sync::Arc<MacosPill>>() {
         let size_str = match size {

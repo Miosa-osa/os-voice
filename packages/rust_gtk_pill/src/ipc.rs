@@ -73,6 +73,64 @@ pub enum InMessage {
     Fireworks { message: String },
     Flame { message: String },
     FlashBlue,
+    Theme {
+        #[serde(default)]
+        wave_style: String,
+        #[serde(default)]
+        accent_color: String,
+        #[serde(default)]
+        accent_color_2: String,
+        #[serde(default)]
+        background_color: String,
+        #[serde(default = "default_unit")]
+        background_alpha: f64,
+        #[serde(default = "default_unit")]
+        border_width: f64,
+        #[serde(default = "default_unit")]
+        roundness: f64,
+        #[serde(default = "default_unit")]
+        speed: f64,
+        #[serde(default = "default_unit")]
+        intensity: f64,
+        #[serde(default)]
+        glow: bool,
+        #[serde(default = "default_unit")]
+        scale: f64,
+        #[serde(default)]
+        effect: String,
+        #[serde(default)]
+        position: String,
+        #[serde(default)]
+        bottom_offset: f64,
+        #[serde(default = "default_unit")]
+        idle_opacity: f64,
+        #[serde(default = "default_unit")]
+        idle_width: f64,
+        #[serde(default)]
+        idle_label: String,
+        #[serde(default)]
+        show_timer: bool,
+        #[serde(default)]
+        reactive_glow: bool,
+        #[serde(default)]
+        loading_style: String,
+        #[serde(default)]
+        shadow: bool,
+        #[serde(default)]
+        rainbow: bool,
+        #[serde(default)]
+        border_color: String,
+        #[serde(default)]
+        rec_indicator: bool,
+        #[serde(default)]
+        idle_shape: String,
+        #[serde(default = "default_stroke_width")]
+        stroke_width: f64,
+        #[serde(default = "default_unit")]
+        wave_opacity: f64,
+        #[serde(default)]
+        preview: bool,
+    },
     BroadcastTranscript { text: String },
     AssistantState {
         active: bool,
@@ -85,6 +143,14 @@ pub enum InMessage {
         permissions: Vec<PillPermission>,
     },
     Quit,
+}
+
+fn default_unit() -> f64 {
+    1.0
+}
+
+fn default_stroke_width() -> f64 {
+    1.6
 }
 
 #[derive(Debug, Serialize)]
