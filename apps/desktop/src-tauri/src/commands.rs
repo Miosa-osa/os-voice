@@ -531,10 +531,17 @@ fn detect_apple_gpu_name() -> Option<String> {
         .map(|g| g.name)
 }
 
-/// Best-effort NVIDIA GPU snapshot via `nvidia-smi`. Returns
-/// (name, utilization %, VRAM used MB, VRAM total MB). Any failure — no NVIDIA
-/// GPU, tool missing, driver/library mismatch — yields None and never errors.
-fn query_nvidia_gpu() -> Option<(Option<String>, Option<f32>, Option<u64>, Option<u64>)> {
+#[derive(Default)]
+struct NvidiaGpuSnapshot {
+    name: Option<String>,
+    utilization_pct: Option<f32>,
+    vram_used_mb: Option<u64>,
+    vram_total_mb: Option<u64>,
+}
+
+/// Best-effort NVIDIA GPU snapshot via `nvidia-smi`.
+/// Missing tools, GPUs, or working drivers yield None.
+fn query_nvidia_gpu() -> Option<NvidiaGpuSnapshot> {
     let out = std::process::Command::new("nvidia-smi")
         .args([
             "--query-gpu=utilization.gpu,memory.used,memory.total,name",
@@ -559,7 +566,12 @@ fn query_nvidia_gpu() -> Option<(Option<String>, Option<f32>, Option<u64>, Optio
     } else {
         Some(parts[3].to_string())
     };
-    Some((name, util, used, total))
+    Some(NvidiaGpuSnapshot {
+        name,
+        utilization_pct: util,
+        vram_used_mb: used,
+        vram_total_mb: total,
+    })
 }
 
 #[tauri::command]
@@ -603,7 +615,7 @@ pub fn get_device_capability() -> DeviceCapability {
     let (vram_total_mb, unified_memory) = if is_apple {
         (Some((ram_gb * 1024.0) as u64), true)
     } else {
-        (query_nvidia_gpu().and_then(|(_, _, _, total)| total), false)
+        (query_nvidia_gpu().and_then(|gpu| gpu.vram_total_mb), false)
     };
 
     DeviceCapability {
@@ -661,17 +673,16 @@ pub fn get_live_system_stats() -> LiveSystemStats {
         };
     }
 
-    let (gpu_name, gpu_util_pct, vram_used_mb, vram_total_mb) =
-        query_nvidia_gpu().unwrap_or((None, None, None, None));
+    let gpu = query_nvidia_gpu().unwrap_or_default();
 
     LiveSystemStats {
         cpu_load_pct,
         ram_used_mb,
         ram_total_mb,
-        gpu_name,
-        gpu_util_pct,
-        vram_used_mb,
-        vram_total_mb,
+        gpu_name: gpu.name,
+        gpu_util_pct: gpu.utilization_pct,
+        vram_used_mb: gpu.vram_used_mb,
+        vram_total_mb: gpu.vram_total_mb,
         unified_memory: false,
     }
 }
