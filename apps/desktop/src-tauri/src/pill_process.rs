@@ -132,6 +132,15 @@ pub fn notify_style_info(app: &tauri::AppHandle, count: u32, name: &str) {
     }
 }
 
+pub fn notify_theme(app: &tauri::AppHandle, theme: &serde_json::Value) {
+    if let Some(pill) = app.try_state::<std::sync::Arc<PillProcess>>() {
+        let message = serde_json::json!({"type": "theme", "theme": theme, "preview": theme.get("preview").and_then(|v| v.as_bool()).unwrap_or(false)});
+        if let Ok(json) = serde_json::to_string(&message) {
+            pill.send(&json);
+        }
+    }
+}
+
 pub fn notify_pill_window_size(app: &tauri::AppHandle, size: &PillWindowSize) {
     if let Some(pill) = app.try_state::<std::sync::Arc<PillProcess>>() {
         let size_str = match size {
@@ -307,4 +316,10 @@ fn start_stdout_reader(app: tauri::AppHandle, reader: std::io::BufReader<ChildSt
         }
         log::info!("Pill overlay process stdout closed");
     });
+}
+
+pub fn notify_completion(app: &tauri::AppHandle) {
+    if let Some(pill) = app.try_state::<std::sync::Arc<PillProcess>>() {
+        pill.send("{\"type\":\"completed\"}");
+    }
 }

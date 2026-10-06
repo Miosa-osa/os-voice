@@ -1,4 +1,4 @@
-import { User, UserPreferences } from "@voquill/types";
+import { DEFAULT_PILL_THEME, User, UserPreferences } from "@voquill/types";
 import { detectLocale } from "../i18n/intl";
 import { getUserPreferencesRepo, getUserRepo } from "../repos";
 import {
@@ -200,6 +200,7 @@ export const submitOnboarding = async () => {
       menuBarIconHidden: false,
       insertionMethod: null,
       typingSpeedMs: null,
+      pillTheme: DEFAULT_PILL_THEME,
     };
 
     const [savedUser, savedPreferences] = await Promise.all([

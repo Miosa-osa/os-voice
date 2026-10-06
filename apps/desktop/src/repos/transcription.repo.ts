@@ -7,6 +7,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import dayjs from "dayjs";
 import { getAppState } from "../store";
+import { AudioPayload, decodeAudioPayload } from "../utils/audio.utils";
 import { getMyEffectiveUserId } from "../utils/user.utils";
 import { BaseRepo } from "./base.repo";
 
@@ -35,10 +36,7 @@ type LocalTranscription = {
   remoteDeviceId?: string | null;
 };
 
-export type TranscriptionAudioData = {
-  samples: number[];
-  sampleRate: number;
-};
+export type TranscriptionAudioData = AudioPayload;
 
 export type ListTranscriptionsParams = {
   limit?: number;
@@ -162,7 +160,9 @@ export class LocalTranscriptionRepo extends BaseTranscriptionRepo {
   }
 
   async loadTranscriptionAudio(id: string): Promise<TranscriptionAudioData> {
-    return invoke<TranscriptionAudioData>("transcription_audio_load", { id });
+    return decodeAudioPayload(
+      await invoke<ArrayBuffer>("transcription_audio_load", { id }),
+    );
   }
 
   async purgeStaleAudio(): Promise<string[]> {

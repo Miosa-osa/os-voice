@@ -223,6 +223,7 @@ pub fn build() -> tauri::Builder<tauri::Wry> {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            crate::commands::local_sidecar_request,
             crate::commands::user_get_one,
             crate::commands::user_set_one,
             crate::commands::user_preferences_get,
@@ -294,6 +295,8 @@ pub fn build() -> tauri::Builder<tauri::Wry> {
             crate::commands::set_phase,
             crate::commands::set_pill_visibility,
             crate::commands::notify_pill_style_info,
+            crate::commands::set_pill_theme,
+            crate::commands::notify_pill_completion,
             crate::commands::sync_native_pill_assistant,
             crate::commands::start_key_listener,
             crate::commands::stop_key_listener,

@@ -1,0 +1,7 @@
+=== repo-hygiene-sweep Mon Oct  5 16:53:36 CDT 2026 ===
+    repo=/Users/rhl/code/TOOLS/_APPS/OSVoice/os-voice  ttl=10d  dry_run=1  worktrees_only=1
+-- stale clean worktrees (>10d, no uncommitted work) --
+  removed worktree: /Users/rhl/code/TOOLS/_APPS/OSVoice/os-voice-candidate
+  worktrees removed: 1  (dirty kept: 0)
+=== done. local=3 remote=16 worktrees=2 ===
+    log: /Users/rhl/code/TOOLS/_APPS/OSVoice/os-voice/docs/cleanup/sweep-20261005-165336.log

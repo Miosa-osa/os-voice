@@ -32,11 +32,171 @@ pub fn list_input_devices() -> Vec<InputDeviceDescriptor> {
     }
 }
 
+pub const TARGET_SAMPLE_RATE: u32 = 16_000;
+
+// Filter before downsampling so high-frequency input cannot alias into speech.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(crate) struct Resampler {
+    step: f64,
+    position: f64,
+    previous: f32,
+    filter: Vec<f32>,
+    history: Vec<f32>,
+    history_index: usize,
+}
+
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+impl Resampler {
+    pub(crate) fn new(input_rate: u32, output_rate: u32) -> Self {
+        let filter = if input_rate > output_rate {
+            let cutoff = 0.45 * f64::from(output_rate) / f64::from(input_rate);
+            let mut taps: Vec<f32> = (0..63)
+                .map(|i| {
+                    let x = i as f64 - 31.0;
+                    let sinc = if x == 0.0 {
+                        2.0 * cutoff
+                    } else {
+                        (2.0 * std::f64::consts::PI * cutoff * x).sin() / (std::f64::consts::PI * x)
+                    };
+                    let phase = std::f64::consts::TAU * i as f64 / 62.0;
+                    (sinc * (0.42 - 0.5 * phase.cos() + 0.08 * (2.0 * phase).cos())) as f32
+                })
+                .collect();
+            let sum: f32 = taps.iter().sum();
+            for tap in &mut taps {
+                *tap /= sum;
+            }
+            taps
+        } else {
+            Vec::new()
+        };
+        Self {
+            history: vec![0.0; filter.len()],
+            filter,
+            history_index: 0,
+            step: f64::from(input_rate) / f64::from(output_rate),
+            position: 0.0,
+            previous: 0.0,
+        }
+    }
+
+    pub(crate) fn process(&mut self, input: &[f32], output: &mut Vec<f32>) {
+        if input.is_empty() {
+            return;
+        }
+        if self.step == 1.0 {
+            output.extend_from_slice(input);
+            return;
+        }
+        let filtered: Vec<f32> = if self.filter.is_empty() {
+            Vec::new()
+        } else {
+            input
+                .iter()
+                .map(|&sample| {
+                    self.history[self.history_index] = sample;
+                    let len = self.history.len();
+                    let value = self
+                        .filter
+                        .iter()
+                        .enumerate()
+                        .map(|(i, c)| c * self.history[(self.history_index + len - i) % len])
+                        .sum();
+                    self.history_index = (self.history_index + 1) % len;
+                    value
+                })
+                .collect()
+        };
+        let input = if self.filter.is_empty() {
+            input
+        } else {
+            &filtered
+        };
+        let len = input.len();
+        let previous = self.previous;
+        let sample_at = |index: usize| {
+            if index == 0 {
+                previous
+            } else {
+                input[index - 1]
+            }
+        };
+        let mut position = self.position;
+        loop {
+            let index = position.floor() as usize;
+            if index >= len {
+                break;
+            }
+            let fraction = (position - index as f64) as f32;
+            let a = sample_at(index);
+            let b = sample_at(index + 1);
+            output.push(a + (b - a) * fraction);
+            position += self.step;
+        }
+        self.position = position - len as f64;
+        self.previous = input[len - 1];
+    }
+}
+
+#[cfg(test)]
+mod resampler_tests {
+    use super::{Resampler, TARGET_SAMPLE_RATE};
+
+    #[test]
+    fn downsamples_48k_to_16k_across_callbacks() {
+        let mut resampler = Resampler::new(48_000, TARGET_SAMPLE_RATE);
+        let mut output = Vec::new();
+        let input: Vec<f32> = (0..48_000).map(|i| (i % 100) as f32 / 100.0).collect();
+        for chunk in input.chunks(1_024) {
+            resampler.process(chunk, &mut output);
+        }
+        assert!(
+            (output.len() as i64 - 16_000).abs() <= 1,
+            "got {}",
+            output.len()
+        );
+        assert!(output.iter().all(|s| s.is_finite() && s.abs() < 1.1));
+    }
+
+    #[test]
+    fn rejects_aliasing_and_preserves_speech_across_chunk_boundaries() {
+        fn tone(hz: f32) -> Vec<f32> {
+            (0..48000)
+                .map(|i| (std::f32::consts::TAU * hz * i as f32 / 48000.0).sin())
+                .collect()
+        }
+        fn rms(values: &[f32]) -> f32 {
+            (values.iter().map(|v| v * v).sum::<f32>() / values.len() as f32).sqrt()
+        }
+        let mut speech = Vec::new();
+        Resampler::new(48000, 16000).process(&tone(1000.0), &mut speech);
+        let mut high = Vec::new();
+        Resampler::new(48000, 16000).process(&tone(12000.0), &mut high);
+        assert!(rms(&speech[100..]) > 0.69);
+        assert!(rms(&high[100..]) < 0.005);
+        let input = tone(1000.0);
+        let mut chunked = Vec::new();
+        let mut r = Resampler::new(48000, 16000);
+        for chunk in input.chunks(1024) {
+            r.process(chunk, &mut chunked);
+        }
+        assert_eq!(speech, chunked);
+    }
+
+    #[test]
+    fn passes_through_matching_rate() {
+        let mut resampler = Resampler::new(16_000, TARGET_SAMPLE_RATE);
+        let mut output = Vec::new();
+        resampler.process(&[0.1, 0.2, 0.3], &mut output);
+        assert_eq!(output, vec![0.1, 0.2, 0.3]);
+    }
+}
+
 // ── CPAL backend (macOS, Windows) ──────────────────────────────────────
 
 #[cfg(not(target_os = "linux"))]
 mod cpal_impl {
-    use super::InputDeviceDescriptor;
+    use super::{InputDeviceDescriptor, Resampler, TARGET_SAMPLE_RATE};
     use crate::domain::{RecordedAudio, RecordingMetrics, RecordingResult};
     use crate::errors::RecordingError;
     use crate::platform::{ChunkCallback, LevelCallback, Recorder};
@@ -374,7 +534,7 @@ mod cpal_impl {
             let samples = recording
                 .buffer
                 .lock()
-                .map(|buffer| buffer.clone())
+                .map(|mut buffer| std::mem::take(&mut *buffer))
                 .unwrap_or_default();
             let sample_rate = recording.sample_rate;
             let fallback_duration = recording.start.elapsed();
@@ -583,7 +743,6 @@ mod cpal_impl {
 
         let sample_format = config.sample_format();
         let stream_config: StreamConfig = config.into();
-        let sample_rate = stream_config.sample_rate.0;
         let buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
 
         let stream = match sample_format {
@@ -621,7 +780,7 @@ mod cpal_impl {
             _stream: stream,
             start: Instant::now(),
             buffer,
-            sample_rate,
+            sample_rate: TARGET_SAMPLE_RATE,
             _level_emitter: level_emitter,
             _chunk_emitter: chunk_emitter,
         })
@@ -670,7 +829,6 @@ mod cpal_impl {
 
             let sample_format = config.sample_format();
             let stream_config: StreamConfig = config.into();
-            let sample_rate = stream_config.sample_rate.0;
             let buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
 
             let stream_result = match sample_format {
@@ -737,7 +895,7 @@ mod cpal_impl {
                     _stream: stream,
                     start: Instant::now(),
                     buffer,
-                    sample_rate,
+                    sample_rate: TARGET_SAMPLE_RATE,
                     _level_emitter: level_emitter.clone(),
                     _chunk_emitter: chunk_emitter.clone(),
                 },
@@ -931,6 +1089,8 @@ mod cpal_impl {
         f32: cpal::FromSample<T>,
     {
         let channel_count = cmp::max(config.channels as usize, 1);
+        let mut resampler = Resampler::new(config.sample_rate.0, TARGET_SAMPLE_RATE);
+        let mut resampled = Vec::new();
         let callback_buffer = buffer.clone();
         let level_emitter_ref = level_emitter;
         let chunk_emitter_ref = chunk_emitter;
@@ -970,12 +1130,15 @@ mod cpal_impl {
                         level_emitter.emit(&mono_samples);
                     }
 
+                    resampled.clear();
+                    resampler.process(&mono_samples, &mut resampled);
+
                     if let Some(ref chunk_emitter) = chunk_emitter_ref {
-                        chunk_emitter.emit(&mono_samples);
+                        chunk_emitter.emit(&resampled);
                     }
 
                     if let Ok(mut shared_buffer) = callback_buffer.lock() {
-                        shared_buffer.extend_from_slice(&mono_samples);
+                        shared_buffer.extend_from_slice(&resampled);
                     }
                 },
                 |err| log::error!("stream error: {err}"),

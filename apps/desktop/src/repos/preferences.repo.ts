@@ -13,6 +13,7 @@ import {
 } from "../utils/dictation-limit.utils";
 import { getEffectivePillVisibility, LOCAL_USER_ID } from "../utils/user.utils";
 import { BaseRepo } from "./base.repo";
+import { parsePillThemeJson } from "../utils/pill-theme.utils";
 
 type LocalUserPreferences = {
   userId: string;
@@ -53,6 +54,7 @@ type LocalUserPreferences = {
   menuBarIconHidden: boolean;
   insertionMethod: Nullable<string>;
   typingSpeedMs: Nullable<number>;
+  pillTheme: Nullable<string>;
 };
 
 // Normalize post-processing mode for backwards compatibility
@@ -111,6 +113,7 @@ const fromLocalPreferences = (
   menuBarIconHidden: preferences.menuBarIconHidden ?? false,
   insertionMethod: preferences.insertionMethod ?? null,
   typingSpeedMs: preferences.typingSpeedMs ?? null,
+  pillTheme: parsePillThemeJson(preferences.pillTheme),
 });
 
 const toLocalPreferences = (
@@ -158,6 +161,7 @@ const toLocalPreferences = (
   menuBarIconHidden: preferences.menuBarIconHidden ?? false,
   insertionMethod: preferences.insertionMethod ?? null,
   typingSpeedMs: preferences.typingSpeedMs ?? null,
+  pillTheme: JSON.stringify(preferences.pillTheme),
 });
 
 export abstract class BaseUserPreferencesRepo extends BaseRepo {

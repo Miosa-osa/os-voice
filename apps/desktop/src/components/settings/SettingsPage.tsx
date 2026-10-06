@@ -1,5 +1,6 @@
 import {
   AppsOutlined,
+  PaletteOutlined,
   ArrowOutwardRounded,
   AutoAwesomeOutlined,
   AutoFixHighOutlined,
@@ -179,6 +180,12 @@ export default function SettingsPage() {
     });
   };
 
+  const openAppearanceDialog = () => {
+    produceAppState((draft) => {
+      draft.settings.appearanceDialogOpen = true;
+    });
+  };
+
   const openMoreSettingsDialog = () => {
     produceAppState((draft) => {
       draft.settings.moreSettingsDialogOpen = true;
@@ -266,6 +273,11 @@ export default function SettingsPage() {
         title={<FormattedMessage defaultMessage="Text insertion options" />}
         leading={<AppsOutlined />}
         onClick={openAppKeybindingsDialog}
+      />
+      <ListTile
+        title={<FormattedMessage defaultMessage="Pill appearance" />}
+        leading={<PaletteOutlined />}
+        onClick={openAppearanceDialog}
       />
       <ListTile
         title={<FormattedMessage defaultMessage="More settings" />}

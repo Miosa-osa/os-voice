@@ -1,4 +1,5 @@
 import {
+  PillTheme,
   ApiKey,
   ApiKeyProvider,
   OpenRouterModel,
@@ -75,6 +76,8 @@ export type SettingsState = {
   aiPostProcessingDialogOpen: boolean;
   agentModeDialogOpen: boolean;
   moreSettingsDialogOpen: boolean;
+  appearanceDialogOpen: boolean;
+  pillThemePreview: PillTheme | null;
   multiDeviceDialogOpen: boolean;
   dictationLanguageDialogOpen: boolean;
   appKeybindingsDialogOpen: boolean;
@@ -128,6 +131,8 @@ export const INITIAL_SETTINGS_STATE: SettingsState = {
   aiPostProcessingDialogOpen: false,
   agentModeDialogOpen: false,
   moreSettingsDialogOpen: false,
+  appearanceDialogOpen: false,
+  pillThemePreview: null,
   multiDeviceDialogOpen: false,
   dictationLanguageDialogOpen: false,
   appKeybindingsDialogOpen: false,

@@ -501,58 +501,6 @@ pub struct DeviceCapability {
     pub gpu_name: Option<String>,
     pub cpu_cores: u32,
     pub ram_gb: f32,
-    /// Total GPU VRAM in MB. On NVIDIA this is best-effort via nvidia-smi; on
-    /// Apple Silicon (unified memory) it mirrors total system RAM. None when
-    /// unavailable (no NVIDIA GPU, tool missing, or driver issue).
-    pub vram_total_mb: Option<u64>,
-    /// True when the GPU shares system RAM (Apple Silicon unified memory). In
-    /// that case there is no separate VRAM and RAM/VRAM figures are identical.
-    pub unified_memory: bool,
-}
-
-/// Returns the GPU name reported by the platform when a usable
-/// integrated/discrete adapter is an Apple GPU (name contains "apple",
-/// case-insensitive). Detection is purely by name so the exact same code
-/// compiles and is verifiable on non-Apple hosts. None otherwise.
-fn detect_apple_gpu_name() -> Option<String> {
-    crate::system::gpu::list_available_gpus()
-        .into_iter()
-        .find(|g| {
-            matches!(g.device_type.as_str(), "DiscreteGpu" | "IntegratedGpu")
-                && g.name.to_lowercase().contains("apple")
-        })
-        .map(|g| g.name)
-}
-
-/// Best-effort NVIDIA GPU snapshot via `nvidia-smi`. Returns
-/// (name, utilization %, VRAM used MB, VRAM total MB). Any failure — no NVIDIA
-/// GPU, tool missing, driver/library mismatch — yields None and never errors.
-fn query_nvidia_gpu() -> Option<(Option<String>, Option<f32>, Option<u64>, Option<u64>)> {
-    let out = std::process::Command::new("nvidia-smi")
-        .args([
-            "--query-gpu=utilization.gpu,memory.used,memory.total,name",
-            "--format=csv,noheader,nounits",
-        ])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let text = String::from_utf8_lossy(&out.stdout);
-    let line = text.lines().next()?;
-    let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
-    if parts.len() < 4 {
-        return None;
-    }
-    let util = parts[0].parse::<f32>().ok();
-    let used = parts[1].parse::<u64>().ok();
-    let total = parts[2].parse::<u64>().ok();
-    let name = if parts[3].is_empty() {
-        None
-    } else {
-        Some(parts[3].to_string())
-    };
-    Some((name, util, used, total))
 }
 
 #[tauri::command]
@@ -585,87 +533,11 @@ pub fn get_device_capability() -> DeviceCapability {
     sys.refresh_memory();
     let ram_gb = sys.total_memory() as f32 / 1_073_741_824.0;
 
-    // Apple Silicon has unified memory: the GPU shares system RAM, there is no
-    // separate VRAM, and nvidia-smi does not exist. Detect it by GPU name so the
-    // same code path is exercised on any platform.
-    let is_apple = usable
-        .as_ref()
-        .map(|g| g.name.to_lowercase().contains("apple"))
-        .unwrap_or(false);
-
-    let (vram_total_mb, unified_memory) = if is_apple {
-        (Some((ram_gb * 1024.0) as u64), true)
-    } else {
-        (query_nvidia_gpu().and_then(|(_, _, _, total)| total), false)
-    };
-
     DeviceCapability {
         has_usable_gpu: usable.is_some(),
         gpu_name: usable.map(|g| g.name),
         cpu_cores,
         ram_gb,
-        vram_total_mb,
-        unified_memory,
-    }
-}
-
-/// A live snapshot of system resource usage, for the Speed & System diagnostics.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct LiveSystemStats {
-    pub cpu_load_pct: f32,
-    pub ram_used_mb: u64,
-    pub ram_total_mb: u64,
-    pub gpu_name: Option<String>,
-    pub gpu_util_pct: Option<f32>,
-    pub vram_used_mb: Option<u64>,
-    pub vram_total_mb: Option<u64>,
-    /// True when the GPU shares system RAM (Apple Silicon unified memory). The
-    /// vram_used/total figures then mirror RAM used/total.
-    pub unified_memory: bool,
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn get_live_system_stats() -> LiveSystemStats {
-    let mut sys = sysinfo::System::new();
-    // CPU usage needs two samples over a short interval to compute a delta.
-    sys.refresh_cpu_usage();
-    std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
-    sys.refresh_cpu_usage();
-    sys.refresh_memory();
-
-    let cpu_load_pct = sys.global_cpu_usage();
-    let ram_used_mb = sys.used_memory() / 1_048_576;
-    let ram_total_mb = sys.total_memory() / 1_048_576;
-
-    // Apple Silicon path: unified memory means "VRAM" is just system RAM, and
-    // there is no unprivileged GPU-utilization source, so gpu_util_pct is None.
-    if let Some(apple_name) = detect_apple_gpu_name() {
-        return LiveSystemStats {
-            cpu_load_pct,
-            ram_used_mb,
-            ram_total_mb,
-            gpu_name: Some(apple_name),
-            gpu_util_pct: None,
-            vram_used_mb: Some(ram_used_mb),
-            vram_total_mb: Some(ram_total_mb),
-            unified_memory: true,
-        };
-    }
-
-    let (gpu_name, gpu_util_pct, vram_used_mb, vram_total_mb) =
-        query_nvidia_gpu().unwrap_or((None, None, None, None));
-
-    LiveSystemStats {
-        cpu_load_pct,
-        ram_used_mb,
-        ram_total_mb,
-        gpu_name,
-        gpu_util_pct,
-        vram_used_mb,
-        vram_total_mb,
-        unified_memory: false,
     }
 }
 
@@ -1929,7 +1801,11 @@ pub async fn paste(
             .ok()
             .flatten();
 
-            let landed = paste_landed(text_before.as_deref(), text_after.as_deref());
+            let landed = paste_landed(
+                text_before.as_deref(),
+                text_after.as_deref(),
+                confident_target,
+            );
 
             if !landed {
                 log::warn!(
