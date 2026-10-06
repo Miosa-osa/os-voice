@@ -10,6 +10,7 @@ mod gfx;
 mod input;
 mod ipc;
 mod state;
+mod wave_canvas;
 
 fn main() {
     let (sender, receiver) = std::sync::mpsc::channel();

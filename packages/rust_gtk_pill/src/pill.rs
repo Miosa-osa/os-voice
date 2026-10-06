@@ -11,6 +11,7 @@ use gtk_layer_shell::LayerShell;
 use crate::constants::*;
 use crate::ipc::{self, InMessage, OutMessage, Phase, Visibility};
 use crate::state::{FlameTongue, PillState, Rocket, RocketPhase, Spark, WindowMode};
+use crate::theme::{CompletionEffect, Placement, Theme};
 use crate::{draw, input, x11};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +33,7 @@ pub fn run(receiver: Receiver<InMessage>) {
         }
     };
 
+    let placement = Rc::new(Cell::new(Placement::default()));
     let window = gtk::Window::new(gtk::WindowType::Toplevel);
     if backend != Backend::PlainWayland {
         window.set_default_size(WINDOW_W_TYPING, WINDOW_H_TYPING);
@@ -57,7 +59,14 @@ pub fn run(receiver: Receiver<InMessage>) {
             window.set_namespace("voquill-pill");
         }
         Backend::X11 => {
-            window.connect_realize(move |window| x11::setup_x11_window(window));
+            let placement = placement.clone();
+            window.set_type_hint(gdk::WindowTypeHint::Dock);
+            window.set_skip_taskbar_hint(true);
+            window.set_skip_pager_hint(true);
+            window.set_keep_above(true);
+            window.set_accept_focus(false);
+            window.stick();
+            window.connect_realize(move |window| x11::setup_x11_window(window, placement.clone()));
         }
         Backend::PlainWayland => {
             window.set_type_hint(gdk::WindowTypeHint::Dock);
@@ -149,6 +158,13 @@ pub fn run(receiver: Receiver<InMessage>) {
         flash_is_error: Cell::new(false),
         flash_action: RefCell::new(None),
         flash_action_label: RefCell::new(None),
+        theme: RefCell::new(Theme::default()),
+        preview: Cell::new(false),
+        preview_clock: Cell::new(0.0),
+        rainbow_clock: Cell::new(0.0),
+        recording_started: Cell::new(None),
+        sparkle_active: Cell::new(false),
+        sparkle_elapsed: Cell::new(0.0),
         fireworks_active: Cell::new(false),
         fireworks_elapsed: Cell::new(0.0),
         fireworks_next_launch: Cell::new(0),
@@ -206,7 +222,9 @@ pub fn run(receiver: Receiver<InMessage>) {
         let was_hovered = state_motion.hovered.get();
         if is_over_pill != was_hovered {
             state_motion.hovered.set(is_over_pill);
-            ipc::send(&OutMessage::Hover { hovered: is_over_pill });
+            ipc::send(&OutMessage::Hover {
+                hovered: is_over_pill,
+            });
         }
         glib::Propagation::Proceed
     });
@@ -302,7 +320,9 @@ pub fn run(receiver: Receiver<InMessage>) {
         let text = e.text().to_string();
         let trimmed = text.trim();
         if !trimmed.is_empty() {
-            ipc::send(&OutMessage::TypedMessage { text: trimmed.to_string() });
+            ipc::send(&OutMessage::TypedMessage {
+                text: trimmed.to_string(),
+            });
             e.set_text("");
             *state_entry.entry_text.borrow_mut() = String::new();
         }
@@ -321,6 +341,7 @@ pub fn run(receiver: Receiver<InMessage>) {
     let quit_flag = Rc::new(Cell::new(false));
     let quit_tick = quit_flag.clone();
     let backend_tick = backend;
+    let placement_tick = placement.clone();
     glib::timeout_add_local(Duration::from_millis(16), move || {
         let rx = receiver.borrow();
         while let Ok(msg) = rx.try_recv() {
@@ -333,6 +354,17 @@ pub fn run(receiver: Receiver<InMessage>) {
                         state_tick.current_level.set(0.0);
                         state_tick.wave_phase.set(0.0);
                     }
+                    if phase == Phase::Recording && prev != Phase::Recording {
+                        state_tick.recording_started.set(Some(Instant::now()));
+                    } else if phase == Phase::Idle {
+                        state_tick.recording_started.set(None);
+                    }
+                }
+                InMessage::Completed => trigger_completion_effect(&state_tick),
+                InMessage::Theme { theme, preview } => {
+                    *state_tick.theme.borrow_mut() = theme.theme();
+                    placement_tick.set(state_tick.theme.borrow().placement());
+                    state_tick.preview.set(preview);
                 }
                 InMessage::Levels { levels } => {
                     *state_tick.pending_levels.borrow_mut() = levels;
@@ -341,11 +373,21 @@ pub fn run(receiver: Receiver<InMessage>) {
                     state_tick.style_count.set(count);
                     *state_tick.style_name.borrow_mut() = name;
                 }
-                InMessage::Toast { message, toast_type, duration, action, action_label } => {
+                InMessage::Toast {
+                    message,
+                    toast_type,
+                    duration,
+                    action,
+                    action_label,
+                } => {
                     *state_tick.flash_message.borrow_mut() = message;
-                    state_tick.flash_is_error.set(toast_type.as_deref() == Some("error"));
+                    state_tick
+                        .flash_is_error
+                        .set(toast_type.as_deref() == Some("error"));
                     state_tick.flash_visible.set(true);
-                    state_tick.flash_timer.set(duration.unwrap_or(FLASH_DURATION));
+                    state_tick
+                        .flash_timer
+                        .set(duration.unwrap_or(FLASH_DURATION));
                     *state_tick.flash_action.borrow_mut() = action;
                     *state_tick.flash_action_label.borrow_mut() = action_label;
                 }
@@ -449,13 +491,10 @@ pub fn run(receiver: Receiver<InMessage>) {
             } else {
                 WINDOW_W_TYPING as f64 - ox - dw
             };
-            let margin_end = (right_margin + (dw - panel_x - panel_w) + PANEL_CONTENT_SIDE_INSET) as i32;
+            let margin_end =
+                (right_margin + (dw - panel_x - panel_w) + PANEL_CONTENT_SIDE_INSET) as i32;
             let ah = state_tick.alloc_height.get();
-            let bottom_margin = if ah > 0.0 {
-                ah - oy - dh
-            } else {
-                0.0
-            };
+            let bottom_margin = if ah > 0.0 { ah - oy - dh } else { 0.0 };
             let margin_bottom = (bottom_margin + PANEL_BOTTOM_MARGIN) as i32;
             entry_tick.set_margin_start(margin_start);
             entry_tick.set_margin_end(margin_end);
@@ -468,7 +507,9 @@ pub fn run(receiver: Receiver<InMessage>) {
                     win_tick.set_keyboard_mode(gtk_layer_shell::KeyboardMode::OnDemand);
                     glib::idle_add_local_once({
                         let e = entry_tick.clone();
-                        move || { e.grab_focus(); }
+                        move || {
+                            e.grab_focus();
+                        }
                     });
                 }
                 Backend::X11 => {
@@ -487,7 +528,9 @@ pub fn run(receiver: Receiver<InMessage>) {
                     win_tick.set_accept_focus(true);
                     glib::idle_add_local_once({
                         let e = entry_tick.clone();
-                        move || { e.grab_focus(); }
+                        move || {
+                            e.grab_focus();
+                        }
                     });
                 }
             }
@@ -506,15 +549,22 @@ pub fn run(receiver: Receiver<InMessage>) {
         }
 
         let visibility = state_tick.visibility.get();
-        let is_active = state_tick.phase.get() != Phase::Idle;
+        let previewing = state_tick.is_previewing();
+        let is_active = state_tick.phase.get() != Phase::Idle || previewing;
         let is_assistant = state_tick.assistant_active.get();
         let should_show = match backend_tick {
             Backend::LayerShell | Backend::PlainWayland => {
-                state_tick.phase.get() == Phase::Recording
+                state_tick.phase.get() == Phase::Recording || previewing
             }
             Backend::X11 => match visibility {
                 Visibility::Hidden => is_assistant,
-                Visibility::WhileActive => is_active || is_assistant,
+                Visibility::WhileActive => {
+                    is_active
+                        || is_assistant
+                        || state_tick.sparkle_active.get()
+                        || state_tick.fireworks_active.get()
+                        || !state_tick.fireworks_rockets.borrow().is_empty()
+                }
                 Visibility::Persistent => true,
             },
         };
@@ -580,15 +630,49 @@ pub fn run(receiver: Receiver<InMessage>) {
     main_loop.run();
 }
 
+fn trigger_completion_effect(state: &PillState) {
+    let effect = state.theme.borrow().effect;
+    match effect {
+        CompletionEffect::None => {}
+        CompletionEffect::Sparkle => {
+            state.sparkle_active.set(true);
+            state.sparkle_elapsed.set(0.0);
+        }
+        CompletionEffect::Fireworks => {
+            state.fireworks_active.set(true);
+            state.fireworks_elapsed.set(0.0);
+            state.fireworks_next_launch.set(0);
+            state.fireworks_rockets.borrow_mut().clear();
+        }
+    }
+}
+
 fn tick(state: &PillState) {
+    state
+        .rainbow_clock
+        .set((state.rainbow_clock.get() + SPRING_DT) % 1000.0);
+    if state.sparkle_active.get() {
+        let elapsed = state.sparkle_elapsed.get() + SPRING_DT;
+        state.sparkle_elapsed.set(elapsed);
+        if elapsed >= SPARKLE_DURATION {
+            state.sparkle_active.set(false);
+        }
+    }
+
     let phase = state.phase.get();
-    let is_active = phase != Phase::Idle;
+    let previewing = state.is_previewing();
+    let is_active = phase != Phase::Idle || previewing;
     let is_recording = phase == Phase::Recording;
     let is_loading = phase == Phase::Loading;
     let hovered = state.hovered.get();
 
     // Audio levels
-    if is_recording {
+    if previewing {
+        let clock = state.preview_clock.get() + SPRING_DT;
+        state.preview_clock.set(clock);
+        let synthetic = 0.4 + 0.25 * (clock * 2.3).sin() + 0.15 * (clock * 7.1).sin();
+        state.target_level.set(synthetic.clamp(0.1, 1.0));
+    } else if is_recording {
         let levels = state.pending_levels.borrow();
         if !levels.is_empty() {
             let sum: f64 = levels.iter().map(|v| *v as f64).sum();
@@ -597,7 +681,9 @@ fn tick(state: &PillState) {
             let combined = (avg * 0.9 + peak * 0.85).min(1.0);
             let boosted = (combined.sqrt() * 1.35).min(1.0);
             let target = state.target_level.get();
-            state.target_level.set((target * 0.25 + boosted * 0.75).min(1.0));
+            state
+                .target_level
+                .set((target * 0.25 + boosted * 0.75).min(1.0));
         }
     } else if is_loading {
         let target = state.target_level.get();
@@ -613,24 +699,48 @@ fn tick(state: &PillState) {
     let current = state.current_level.get();
     let target = state.target_level.get();
     let new_current = current + (target - current) * LEVEL_SMOOTHING;
-    state.current_level.set(if new_current < 0.0002 { 0.0 } else { new_current });
+    state.current_level.set(if new_current < 0.0002 {
+        0.0
+    } else {
+        new_current
+    });
 
     let decayed = target * TARGET_DECAY_PER_FRAME;
-    state.target_level.set(if decayed < 0.0005 { 0.0 } else { decayed });
+    state
+        .target_level
+        .set(if decayed < 0.0005 { 0.0 } else { decayed });
 
     let level = state.current_level.get();
-    let base_level = if is_loading && !is_recording { PROCESSING_BASE_LEVEL } else { 0.0 };
+    let base_level = if is_loading && !is_recording {
+        PROCESSING_BASE_LEVEL
+    } else {
+        0.0
+    };
     let effective_level = level.max(base_level);
-    let advance = WAVE_BASE_PHASE_STEP + WAVE_PHASE_GAIN * effective_level;
-    state.wave_phase.set((state.wave_phase.get() + advance) % TAU);
+    let advance =
+        (WAVE_BASE_PHASE_STEP + WAVE_PHASE_GAIN * effective_level) * state.theme.borrow().speed;
+    state
+        .wave_phase
+        .set((state.wave_phase.get() + advance) % TAU);
 
     // Pill expand/collapse (spring)
-    let expand_target = if is_active || hovered || state.assistant_active.get() { 1.0 } else { 0.0 };
-    spring_anim(&state.expand_t, &state.expand_velocity, expand_target, SPRING_STIFFNESS);
+    let expand_target = if is_active || hovered || state.assistant_active.get() {
+        1.0
+    } else {
+        0.0
+    };
+    spring_anim(
+        &state.expand_t,
+        &state.expand_velocity,
+        expand_target,
+        SPRING_STIFFNESS,
+    );
 
     // Loading offset
     if is_loading {
-        state.loading_offset.set((state.loading_offset.get() + LOADING_SPEED) % 1.0);
+        state
+            .loading_offset
+            .set((state.loading_offset.get() + LOADING_SPEED) % 1.0);
     }
 
     // Tooltip animation (spring)
@@ -639,25 +749,60 @@ fn tick(state: &PillState) {
         && (hovered || phase == Phase::Recording)
         && state.expand_t.get() > 0.3;
     let tooltip_target = if show_tooltip { 1.0 } else { 0.0 };
-    spring_anim(&state.tooltip_t, &state.tooltip_velocity, tooltip_target, SPRING_STIFFNESS);
+    spring_anim(
+        &state.tooltip_t,
+        &state.tooltip_velocity,
+        tooltip_target,
+        SPRING_STIFFNESS,
+    );
 
     // Panel open/close (spring)
-    let panel_target = if state.assistant_active.get() { 1.0 } else { 0.0 };
-    spring_anim(&state.panel_open_t, &state.panel_open_velocity, panel_target, SPRING_STIFFNESS);
+    let panel_target = if state.assistant_active.get() {
+        1.0
+    } else {
+        0.0
+    };
+    spring_anim(
+        &state.panel_open_t,
+        &state.panel_open_velocity,
+        panel_target,
+        SPRING_STIFFNESS,
+    );
 
     // Keyboard button (spring)
     let is_voice = *state.assistant_input_mode.borrow() == "voice";
-    let kb_target = if state.assistant_active.get() && is_voice { 1.0 } else { 0.0 };
-    spring_anim(&state.kb_button_t, &state.kb_button_velocity, kb_target, SPRING_STIFFNESS);
+    let kb_target = if state.assistant_active.get() && is_voice {
+        1.0
+    } else {
+        0.0
+    };
+    spring_anim(
+        &state.kb_button_t,
+        &state.kb_button_velocity,
+        kb_target,
+        SPRING_STIFFNESS,
+    );
 
     // Animate content dimensions toward target mode
     let mode = state.window_mode.get();
     let (tw, th) = mode.dimensions();
-    spring_px(&state.draw_width, &state.draw_w_velocity, tw as f64, SPRING_STIFFNESS);
-    spring_px(&state.draw_height, &state.draw_h_velocity, th as f64, SPRING_STIFFNESS);
+    spring_px(
+        &state.draw_width,
+        &state.draw_w_velocity,
+        tw as f64,
+        SPRING_STIFFNESS,
+    );
+    spring_px(
+        &state.draw_height,
+        &state.draw_h_velocity,
+        th as f64,
+        SPRING_STIFFNESS,
+    );
 
     // Shimmer phase for thinking animation
-    state.shimmer_phase.set((state.shimmer_phase.get() + SHIMMER_SPEED) % 1.0);
+    state
+        .shimmer_phase
+        .set((state.shimmer_phase.get() + SHIMMER_SPEED) % 1.0);
 
     // Fireworks
     tick_fireworks(state);
@@ -684,14 +829,27 @@ fn tick(state: &PillState) {
         }
     }
     let flash_target = if state.flash_visible.get() { 1.0 } else { 0.0 };
-    spring_anim(&state.flash_t, &state.flash_velocity, flash_target, SPRING_STIFFNESS);
+    spring_anim(
+        &state.flash_t,
+        &state.flash_velocity,
+        flash_target,
+        SPRING_STIFFNESS,
+    );
 
     // Cancel button
-    let cancel_target = if state.hovered.get()
-        && state.phase.get() != Phase::Idle
-        && !state.assistant_active.get()
-    { 1.0 } else { 0.0 };
-    spring_anim(&state.cancel_t, &state.cancel_velocity, cancel_target, SPRING_STIFFNESS * 2.0);
+    let cancel_target =
+        if state.hovered.get() && state.phase.get() != Phase::Idle && !state.assistant_active.get()
+        {
+            1.0
+        } else {
+            0.0
+        };
+    spring_anim(
+        &state.cancel_t,
+        &state.cancel_velocity,
+        cancel_target,
+        SPRING_STIFFNESS * 2.0,
+    );
 
     // Auto-scroll to bottom when new content arrives
     if state.should_stick.get() && state.assistant_active.get() && !state.assistant_compact.get() {
@@ -871,7 +1029,11 @@ fn tick_transcript(state: &PillState) {
         0.0
     };
 
-    let speed = if target > 0.5 { TRANSCRIPT_RISE_SPEED } else { TRANSCRIPT_FADE_SPEED };
+    let speed = if target > 0.5 {
+        TRANSCRIPT_RISE_SPEED
+    } else {
+        TRANSCRIPT_FADE_SPEED
+    };
     let opacity = state.transcript_opacity.get();
     let blend = 1.0 - (-speed * dt).exp();
     let next = opacity + (target - opacity) * blend;
@@ -887,7 +1049,9 @@ fn tick_transcript(state: &PillState) {
 fn spring_anim(value: &Cell<f64>, velocity: &Cell<f64>, target: f64, stiffness: f64) {
     let v = value.get();
     let vel = velocity.get();
-    if v == target && vel == 0.0 { return; }
+    if v == target && vel == 0.0 {
+        return;
+    }
     let damping = 2.0 * stiffness.sqrt();
     let force = stiffness * (target - v) - damping * vel;
     let new_vel = vel + force * SPRING_DT;
@@ -897,14 +1061,20 @@ fn spring_anim(value: &Cell<f64>, velocity: &Cell<f64>, target: f64, stiffness: 
         velocity.set(0.0);
     } else {
         value.set(new_v.clamp(0.0, 1.0));
-        velocity.set(if new_v < 0.0 || new_v > 1.0 { 0.0 } else { new_vel });
+        velocity.set(if new_v < 0.0 || new_v > 1.0 {
+            0.0
+        } else {
+            new_vel
+        });
     }
 }
 
 fn spring_px(value: &Cell<f64>, velocity: &Cell<f64>, target: f64, stiffness: f64) {
     let v = value.get();
     let vel = velocity.get();
-    if v == target && vel == 0.0 { return; }
+    if v == target && vel == 0.0 {
+        return;
+    }
     let damping = 2.0 * stiffness.sqrt();
     let force = stiffness * (target - v) - damping * vel;
     let new_vel = vel + force * SPRING_DT;

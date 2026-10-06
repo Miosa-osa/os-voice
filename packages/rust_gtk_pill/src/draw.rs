@@ -6,6 +6,7 @@ use crate::ipc::{Phase, PillPermission, PillStreaming};
 
 use crate::constants::*;
 use crate::state::{ClickAction, ClickRegion, PillState, RocketPhase};
+use crate::theme::{hue_to_rgb, IdleShape, LoadingStyle, Theme};
 
 pub(crate) fn draw_all(cr: &cairo::Context, state: &PillState) {
     cr.set_operator(cairo::Operator::Source);
@@ -48,6 +49,10 @@ pub(crate) fn draw_all(cr: &cairo::Context, state: &PillState) {
             draw_fireworks(cr, state, ww, wh);
         }
 
+        if state.sparkle_active.get() {
+            draw_sparkle(cr, state, ww, wh);
+        }
+
         if state.flash_t.get() > 0.01 {
             draw_flash_message(cr, state, ww, wh);
         }
@@ -64,8 +69,16 @@ pub(crate) fn draw_all(cr: &cairo::Context, state: &PillState) {
 
 pub(crate) fn pill_position(state: &PillState, ww: f64, wh: f64) -> (f64, f64, f64, f64) {
     let expand_t = state.expand_t.get();
-    let pill_w = lerp(MIN_PILL_WIDTH, EXPANDED_PILL_WIDTH, expand_t);
-    let pill_h = lerp(MIN_PILL_HEIGHT, EXPANDED_PILL_HEIGHT, expand_t);
+    let (scale, idle_width, idle_shape) = {
+        let theme = state.theme.borrow();
+        (theme.scale, theme.idle_width, theme.idle_shape)
+    };
+    let (min_w, min_h) = match idle_shape {
+        IdleShape::Bar => (MIN_PILL_WIDTH * idle_width, MIN_PILL_HEIGHT),
+        IdleShape::Dot => (10.0 * idle_width, 10.0),
+    };
+    let pill_w = lerp(min_w, EXPANDED_PILL_WIDTH * scale, expand_t);
+    let pill_h = lerp(min_h, EXPANDED_PILL_HEIGHT * scale, expand_t);
     let pill_x = (ww - pill_w) / 2.0;
 
     let pill_y = if state.assistant_active.get() || state.panel_open_t.get() > 0.01 {
@@ -84,118 +97,200 @@ fn draw_pill(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64) {
     let expand_t = state.expand_t.get();
     let (rx, ry, pill_w, pill_h) = pill_position(state, ww, wh);
 
-    let bg_alpha = lerp(IDLE_BG_ALPHA, ACTIVE_BG_ALPHA, expand_t);
-    let radius = lerp(COLLAPSED_RADIUS, EXPANDED_RADIUS, expand_t);
+    let mut theme = state.theme.borrow().clone();
+    if theme.rainbow {
+        let hue = state.rainbow_clock.get() * 0.12;
+        theme.accent = hue_to_rgb(hue);
+        theme.accent2 = Some(hue_to_rgb(hue + 0.3));
+    }
+    let bg_alpha = lerp(
+        IDLE_BG_ALPHA * theme.idle_opacity,
+        ACTIVE_BG_ALPHA * theme.background_alpha,
+        expand_t,
+    );
+    let radius = lerp(
+        COLLAPSED_RADIUS,
+        EXPANDED_RADIUS * (0.15 + 0.85 * theme.roundness),
+        expand_t,
+    )
+    .min(pill_h / 2.0)
+    .min(pill_w / 2.0);
 
-    let is_typing = state.assistant_active.get()
-        && *state.assistant_input_mode.borrow() == "type";
+    let is_typing = state.assistant_active.get() && *state.assistant_input_mode.borrow() == "type";
     if is_typing {
         return;
     }
 
+    let (ar, ag, ab) = theme.accent;
+    let (br, bg, bb) = theme.background;
+    let (borr, borg, borb) = theme.border_color.unwrap_or(theme.accent);
+
+    if theme.shadow {
+        for (spread, alpha) in [(6.0, 0.05), (3.0, 0.1), (1.0, 0.18)] {
+            rounded_rect(
+                cr,
+                rx - spread,
+                ry - spread + 3.0,
+                pill_w + spread * 2.0,
+                pill_h + spread * 2.0,
+                radius + spread,
+            );
+            cr.set_source_rgba(0.0, 0.0, 0.0, alpha);
+            let _ = cr.fill();
+        }
+    }
+
+    if theme.glow && expand_t > 0.1 {
+        let reactive = if theme.reactive_glow {
+            0.35 + 0.9 * (state.current_level.get() * theme.intensity).min(1.0)
+        } else {
+            1.0
+        };
+        for (spread, alpha) in [(6.0, 0.06), (4.0, 0.12), (2.0, 0.2)] {
+            rounded_rect(
+                cr,
+                rx - spread,
+                ry - spread,
+                pill_w + spread * 2.0,
+                pill_h + spread * 2.0,
+                radius + spread,
+            );
+            cr.set_source_rgba(ar, ag, ab, alpha * expand_t * reactive);
+            let _ = cr.fill();
+        }
+    }
+
     rounded_rect(cr, rx, ry, pill_w, pill_h, radius);
-    cr.set_source_rgba(0.0, 0.0, 0.0, bg_alpha);
+    cr.set_source_rgba(br, bg, bb, bg_alpha);
     let _ = cr.fill();
 
-    rounded_rect(cr, rx + 0.5, ry + 0.5, pill_w - 1.0, pill_h - 1.0, radius - 0.5);
-    cr.set_source_rgba(1.0, 1.0, 1.0, BORDER_ALPHA);
-    cr.set_line_width(1.0);
-    let _ = cr.stroke();
+    if theme.border_width > 0.0 {
+        let inset = theme.border_width / 2.0;
+        rounded_rect(
+            cr,
+            rx + inset,
+            ry + inset,
+            pill_w - theme.border_width,
+            pill_h - theme.border_width,
+            (radius - inset).max(0.0),
+        );
+        cr.set_source_rgba(
+            borr,
+            borg,
+            borb,
+            if theme.border_color.is_some() {
+                0.85
+            } else {
+                BORDER_ALPHA
+            },
+        );
+        cr.set_line_width(theme.border_width);
+        let _ = cr.stroke();
+    }
 
-    match state.phase.get() {
+    let phase = if state.is_previewing() {
+        Phase::Recording
+    } else {
+        state.phase.get()
+    };
+    match phase {
         Phase::Recording if expand_t > 0.1 => {
-            draw_waveform(cr, rx, ry, pill_w, pill_h, expand_t, state);
-            draw_edge_gradient(cr, rx, ry, pill_w, pill_h, radius, expand_t);
+            rust_pill_style::waves::draw(
+                &crate::wave_canvas::WaveCanvas(cr),
+                rx,
+                ry,
+                pill_w,
+                pill_h,
+                expand_t,
+                &rust_pill_style::waves::WaveState {
+                    phase: state.wave_phase.get(),
+                    level: state.current_level.get(),
+                    clock: state.rainbow_clock.get(),
+                },
+                &theme,
+            );
+            if theme.rec_indicator {
+                draw_rec_indicator(cr, state, &theme, rx, ry, pill_h, expand_t);
+            }
+            if theme.show_timer {
+                draw_timer(cr, state, &theme, rx, ry, pill_w, expand_t);
+            }
         }
-        Phase::Loading if expand_t > 0.1 => {
-            draw_loading(cr, rx, ry, pill_w, pill_h, radius, expand_t, state);
-        }
+        Phase::Loading if expand_t > 0.1 => match theme.loading_style {
+            LoadingStyle::Bar => draw_loading(cr, rx, ry, pill_w, pill_h, radius, expand_t, state),
+            LoadingStyle::Spinner => {
+                draw_loading_spinner(cr, rx, ry, pill_w, pill_h, expand_t, state, &theme)
+            }
+            LoadingStyle::Dots => {
+                draw_loading_dots(cr, rx, ry, pill_w, pill_h, expand_t, state, &theme)
+            }
+        },
         Phase::Idle if expand_t > 0.5 && (state.hovered.get() || state.assistant_active.get()) => {
-            draw_idle_label(cr, rx, ry, pill_w, pill_h, expand_t);
+            draw_idle_label(cr, rx, ry, pill_w, pill_h, expand_t, &theme);
         }
         _ => {}
     }
 
     state.click_regions.borrow_mut().push(ClickRegion {
-        x: rx, y: ry, w: pill_w, h: pill_h,
-        action: if state.assistant_active.get() { ClickAction::Pill } else { ClickAction::Pill },
+        x: rx,
+        y: ry,
+        w: pill_w,
+        h: pill_h,
+        action: if state.assistant_active.get() {
+            ClickAction::Pill
+        } else {
+            ClickAction::Pill
+        },
     });
 }
 
-fn draw_waveform(
-    cr: &cairo::Context, rx: f64, ry: f64, pill_w: f64, pill_h: f64,
-    expand_t: f64, state: &PillState,
+fn draw_rec_indicator(
+    cr: &cairo::Context,
+    state: &PillState,
+    theme: &Theme,
+    rx: f64,
+    ry: f64,
+    pill_h: f64,
+    expand_t: f64,
 ) {
-    let wave_phase = state.wave_phase.get();
-    let level = state.current_level.get();
-    let baseline = ry + pill_h / 2.0;
-
-    cr.save().ok();
-    rounded_rect(cr, rx, ry, pill_w, pill_h, pill_h / 2.0);
-    cr.clip();
-
-    for config in WAVE_CONFIGS {
-        let amplitude_factor = (level * config.multiplier).clamp(MIN_AMPLITUDE, MAX_AMPLITUDE);
-        let amplitude = (pill_h * 0.75 * amplitude_factor).max(1.0);
-        let phase = wave_phase + config.phase_offset;
-        let alpha = config.opacity * expand_t;
-
-        cr.set_source_rgba(1.0, 1.0, 1.0, alpha);
-        cr.set_line_width(STROKE_WIDTH);
-        cr.set_line_cap(cairo::LineCap::Round);
-        cr.set_line_join(cairo::LineJoin::Round);
-
-        let segments = (pill_w / 2.0).max(72.0) as i32;
-        for i in 0..=segments {
-            let t = i as f64 / segments as f64;
-            let x = rx + pill_w * t;
-            let theta = config.frequency * t * TAU + phase;
-            let y = baseline + amplitude * theta.sin();
-
-            if i == 0 {
-                cr.move_to(x, y);
-            } else {
-                cr.line_to(x, y);
-            }
-        }
-        let _ = cr.stroke();
-    }
-
-    cr.restore().ok();
+    let blink = 0.55 + 0.45 * (state.rainbow_clock.get() * 4.0).sin();
+    let (r, g, b) = theme.border_color.unwrap_or((1.0, 0.25, 0.3));
+    cr.set_source_rgba(r, g, b, blink * expand_t);
+    cr.arc(rx + pill_h * 0.4, ry + pill_h / 2.0, 2.6, 0.0, TAU);
+    let _ = cr.fill();
 }
 
-fn draw_edge_gradient(
-    cr: &cairo::Context, rx: f64, ry: f64, pill_w: f64, pill_h: f64,
-    radius: f64, expand_t: f64,
-) {
-    cr.save().ok();
-    rounded_rect(cr, rx, ry, pill_w, pill_h, radius);
-    cr.clip();
+fn draw_sparkle(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64) {
+    let progress = (state.sparkle_elapsed.get() / SPARKLE_DURATION).clamp(0.0, 1.0);
+    let (rx, ry, pill_w, pill_h) = pill_position(state, ww, wh);
+    let cx = rx + pill_w / 2.0;
+    let cy = ry + pill_h / 2.0;
+    let (r, g, b) = state.theme.borrow().accent;
+    let eased = 1.0 - (1.0 - progress).powi(3);
+    let radius = pill_w * 0.3 + eased * 42.0;
+    let alpha = 1.0 - progress;
 
-    let alpha = 0.9 * expand_t;
-
-    let left_grad = cairo::LinearGradient::new(rx, 0.0, rx + pill_w * 0.18, 0.0);
-    left_grad.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, alpha);
-    left_grad.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 0.0);
-    cr.set_source(&left_grad).ok();
-    cr.rectangle(rx, ry, pill_w * 0.18, pill_h);
-    let _ = cr.fill();
-
-    let right_start = rx + pill_w * 0.85;
-    let right_grad = cairo::LinearGradient::new(right_start, 0.0, rx + pill_w, 0.0);
-    right_grad.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, 0.0);
-    right_grad.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, alpha);
-    cr.set_source(&right_grad).ok();
-    cr.rectangle(right_start, ry, pill_w * 0.15, pill_h);
-    let _ = cr.fill();
-
-    cr.restore().ok();
+    for i in 0..SPARKLE_COUNT {
+        let angle = i as f64 / SPARKLE_COUNT as f64 * TAU + 0.3;
+        let x = cx + radius * angle.cos();
+        let y = cy + radius * 0.6 * angle.sin();
+        cr.set_source_rgba(r, g, b, alpha);
+        cr.arc(x, y, 1.0 + 2.5 * alpha, 0.0, TAU);
+        let _ = cr.fill();
+    }
 }
 
 fn draw_loading(
-    cr: &cairo::Context, rx: f64, ry: f64, pill_w: f64, pill_h: f64,
-    radius: f64, expand_t: f64, state: &PillState,
+    cr: &cairo::Context,
+    rx: f64,
+    ry: f64,
+    pill_w: f64,
+    pill_h: f64,
+    radius: f64,
+    expand_t: f64,
+    state: &PillState,
 ) {
+    let (r, g, b) = state.theme.borrow().accent;
     cr.save().ok();
     rounded_rect(cr, rx, ry, pill_w, pill_h, radius);
     cr.clip();
@@ -206,8 +301,8 @@ fn draw_loading(
     let track_x = rx + pad;
     let track_w = pill_w - pad * 2.0;
 
-    // Track line
-    cr.set_source_rgba(1.0, 1.0, 1.0, 0.15 * expand_t);
+    let (r, g, b) = state.theme.borrow().accent;
+    cr.set_source_rgba(r, g, b, 0.15 * expand_t);
     cr.rectangle(track_x, bar_y, track_w, bar_h);
     let _ = cr.fill();
 
@@ -219,21 +314,113 @@ fn draw_loading(
     let draw_left = ind_x.max(track_x);
     let draw_right = (ind_x + indicator_w).min(track_x + track_w);
     if draw_right > draw_left {
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.7 * expand_t);
+        cr.set_source_rgba(r, g, b, 0.7 * expand_t);
         cr.rectangle(draw_left, bar_y, draw_right - draw_left, bar_h);
         let _ = cr.fill();
     }
 
     cr.restore().ok();
-
-    draw_edge_gradient(cr, rx, ry, pill_w, pill_h, radius, expand_t);
 }
 
-fn draw_idle_label(cr: &cairo::Context, rx: f64, ry: f64, pill_w: f64, pill_h: f64, expand_t: f64) {
+fn draw_timer(
+    cr: &cairo::Context,
+    state: &PillState,
+    theme: &Theme,
+    rx: f64,
+    ry: f64,
+    pill_w: f64,
+    expand_t: f64,
+) {
+    let seconds = state
+        .recording_started
+        .get()
+        .map(|started| started.elapsed().as_secs())
+        .unwrap_or_else(|| state.preview_clock.get() as u64);
+    let text = format!("{}:{:02}", seconds / 60, seconds % 60);
+    let (r, g, b) = theme.accent;
+    cr.set_source_rgba(r, g, b, 0.85 * expand_t);
+    cr.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Bold,
+    );
+    cr.set_font_size(10.0);
+    let extents = cr.text_extents(&text).unwrap();
+    cr.move_to(
+        rx + (pill_w - extents.width()) / 2.0 - extents.x_bearing(),
+        ry - 6.0,
+    );
+    let _ = cr.show_text(&text);
+}
+
+fn draw_loading_spinner(
+    cr: &cairo::Context,
+    rx: f64,
+    ry: f64,
+    pill_w: f64,
+    pill_h: f64,
+    expand_t: f64,
+    state: &PillState,
+    theme: &Theme,
+) {
+    let (r, g, b) = theme.accent;
+    let cx = rx + pill_w / 2.0;
+    let cy = ry + pill_h / 2.0;
+    let radius = pill_h * 0.28;
+    let start = state.loading_offset.get() * TAU * 1.5;
+    cr.set_source_rgba(r, g, b, 0.2 * expand_t);
+    cr.set_line_width(2.0);
+    cr.arc(cx, cy, radius, 0.0, TAU);
+    let _ = cr.stroke();
+    cr.set_source_rgba(r, g, b, 0.9 * expand_t);
+    cr.set_line_cap(cairo::LineCap::Round);
+    cr.arc(cx, cy, radius, start, start + TAU * 0.3);
+    let _ = cr.stroke();
+}
+
+fn draw_loading_dots(
+    cr: &cairo::Context,
+    rx: f64,
+    ry: f64,
+    pill_w: f64,
+    pill_h: f64,
+    expand_t: f64,
+    state: &PillState,
+    theme: &Theme,
+) {
+    let (r, g, b) = theme.accent;
+    let cy = ry + pill_h / 2.0;
+    let phase = state.loading_offset.get() * TAU;
+    for i in 0..3 {
+        let pulse = 0.5 + 0.5 * (phase * 1.5 - i as f64 * 1.3).sin();
+        let x = rx + pill_w / 2.0 + (i as f64 - 1.0) * 12.0;
+        cr.set_source_rgba(r, g, b, (0.25 + 0.7 * pulse) * expand_t);
+        cr.arc(x, cy, 2.0 + 1.5 * pulse, 0.0, TAU);
+        let _ = cr.fill();
+    }
+}
+
+fn draw_idle_label(
+    cr: &cairo::Context,
+    rx: f64,
+    ry: f64,
+    pill_w: f64,
+    pill_h: f64,
+    expand_t: f64,
+    theme: &Theme,
+) {
     cr.set_source_rgba(1.0, 1.0, 1.0, 0.4 * expand_t);
-    cr.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
+    cr.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Bold,
+    );
     cr.set_font_size(11.0);
-    let text = "Click to dictate";
+    let text = if theme.idle_label.is_empty() {
+        "Click to dictate"
+    } else {
+        theme.idle_label.as_str()
+    };
     let extents = cr.text_extents(text).unwrap();
     let tx = rx + (pill_w - extents.width()) / 2.0 - extents.x_bearing();
     let ty = ry + (pill_h - extents.height()) / 2.0 - extents.y_bearing();
@@ -254,7 +441,11 @@ fn draw_tooltip(cr: &cairo::Context, state: &PillState, ww: f64, pill_area_top: 
         return;
     }
 
-    cr.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
+    cr.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Bold,
+    );
     cr.set_font_size(11.0);
     let text_extents = cr.text_extents(&style_name).unwrap();
     let text_w = text_extents.width().clamp(20.0, 100.0);
@@ -269,11 +460,25 @@ fn draw_tooltip(cr: &cairo::Context, state: &PillState, ww: f64, pill_area_top: 
     let tooltip_ry = pill_area_top - TOOLTIP_GAP - TOOLTIP_HEIGHT + y_offset;
     let alpha = tooltip_t;
 
-    rounded_rect(cr, tooltip_rx, tooltip_ry, tooltip_w, TOOLTIP_HEIGHT, TOOLTIP_RADIUS);
+    rounded_rect(
+        cr,
+        tooltip_rx,
+        tooltip_ry,
+        tooltip_w,
+        TOOLTIP_HEIGHT,
+        TOOLTIP_RADIUS,
+    );
     cr.set_source_rgba(0.0, 0.0, 0.0, 0.92 * alpha);
     let _ = cr.fill();
 
-    rounded_rect(cr, tooltip_rx + 0.5, tooltip_ry + 0.5, tooltip_w - 1.0, TOOLTIP_HEIGHT - 1.0, TOOLTIP_RADIUS - 0.5);
+    rounded_rect(
+        cr,
+        tooltip_rx + 0.5,
+        tooltip_ry + 0.5,
+        tooltip_w - 1.0,
+        TOOLTIP_HEIGHT - 1.0,
+        TOOLTIP_RADIUS - 0.5,
+    );
     cr.set_source_rgba(1.0, 1.0, 1.0, 0.2 * alpha);
     cr.set_line_width(1.0);
     let _ = cr.stroke();
@@ -304,7 +509,11 @@ fn draw_tooltip(cr: &cairo::Context, state: &PillState, ww: f64, pill_area_top: 
 
     // Style name text
     cr.set_source_rgba(1.0, 1.0, 1.0, 0.9 * alpha);
-    cr.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
+    cr.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Bold,
+    );
     cr.set_font_size(11.0);
     let text_area_left = tooltip_rx + padding_h + chevron_area;
     let text_area_right = tooltip_rx + tooltip_w - padding_h - chevron_area;
@@ -313,7 +522,12 @@ fn draw_tooltip(cr: &cairo::Context, state: &PillState, ww: f64, pill_area_top: 
     let ty = center_y - text_extents.height() / 2.0 - text_extents.y_bearing();
 
     cr.save().ok();
-    cr.rectangle(text_area_left, tooltip_ry, text_area_right - text_area_left, TOOLTIP_HEIGHT);
+    cr.rectangle(
+        text_area_left,
+        tooltip_ry,
+        text_area_right - text_area_left,
+        TOOLTIP_HEIGHT,
+    );
     cr.clip();
     cr.move_to(tx, ty);
     let _ = cr.show_text(&style_name);
@@ -322,11 +536,17 @@ fn draw_tooltip(cr: &cairo::Context, state: &PillState, ww: f64, pill_area_top: 
     // Click regions for tooltip
     let mid_x = tooltip_rx + tooltip_w / 2.0;
     state.click_regions.borrow_mut().push(ClickRegion {
-        x: tooltip_rx, y: tooltip_ry, w: mid_x - tooltip_rx, h: TOOLTIP_HEIGHT,
+        x: tooltip_rx,
+        y: tooltip_ry,
+        w: mid_x - tooltip_rx,
+        h: TOOLTIP_HEIGHT,
         action: ClickAction::StyleBackward,
     });
     state.click_regions.borrow_mut().push(ClickRegion {
-        x: mid_x, y: tooltip_ry, w: tooltip_rx + tooltip_w - mid_x, h: TOOLTIP_HEIGHT,
+        x: mid_x,
+        y: tooltip_ry,
+        w: tooltip_rx + tooltip_w - mid_x,
+        h: TOOLTIP_HEIGHT,
         action: ClickAction::StyleForward,
     });
 }
@@ -366,7 +586,11 @@ fn draw_flash_message(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64) 
     } else {
         (0.0, None)
     };
-    let action_section = if has_action { FLASH_ACTION_GAP + action_w } else { 0.0 };
+    let action_section = if has_action {
+        FLASH_ACTION_GAP + action_w
+    } else {
+        0.0
+    };
 
     let flash_w = (text_w + FLASH_PADDING_H * 2.0 + action_section).max(80.0);
 
@@ -386,7 +610,11 @@ fn draw_flash_message(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64) 
     cr.translate(-center_x, -center_y);
 
     // Background
-    let (bg_r, bg_g, bg_b) = if is_error { (0.35, 0.05, 0.05) } else { (0.0, 0.0, 0.0) };
+    let (bg_r, bg_g, bg_b) = if is_error {
+        (0.35, 0.05, 0.05)
+    } else {
+        (0.0, 0.0, 0.0)
+    };
     rounded_rect(cr, full_x, full_y, flash_w, FLASH_HEIGHT, FLASH_RADIUS);
     cr.set_source_rgba(bg_r, bg_g, bg_b, 0.92 * alpha);
     let _ = cr.fill();
@@ -407,7 +635,14 @@ fn draw_flash_message(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64) 
         let btn_x = full_x + flash_w - FLASH_PADDING_H - action_w;
         let btn_y = full_y + (FLASH_HEIGHT - FLASH_ACTION_HEIGHT) / 2.0;
 
-        rounded_rect(cr, btn_x, btn_y, action_w, FLASH_ACTION_HEIGHT, FLASH_ACTION_RADIUS);
+        rounded_rect(
+            cr,
+            btn_x,
+            btn_y,
+            action_w,
+            FLASH_ACTION_HEIGHT,
+            FLASH_ACTION_RADIUS,
+        );
         cr.set_source_rgba(1.0, 1.0, 1.0, 0.2 * alpha);
         let _ = cr.fill();
 
@@ -433,7 +668,12 @@ fn draw_flash_message(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64) 
 // ── Flame ────────────────────────────────────────────────────────
 
 fn draw_flame_tongue(
-    cr: &cairo::Context, cx: f64, base_y: f64, h: f64, hw: f64, sway: f64,
+    cr: &cairo::Context,
+    cx: f64,
+    base_y: f64,
+    h: f64,
+    hw: f64,
+    sway: f64,
     gradient_stops: &[(f64, f64, f64, f64, f64)],
 ) {
     let tip_x = cx + sway;
@@ -444,14 +684,20 @@ fn draw_flame_tongue(
     cr.new_sub_path();
     cr.move_to(cx - hw, base_y - base_r);
     cr.curve_to(
-        cx - hw * 1.15, base_y - h * 0.35,
-        cx - hw * 0.12 + sway * 0.3, base_y - h * 0.72,
-        tip_x, tip_y,
+        cx - hw * 1.15,
+        base_y - h * 0.35,
+        cx - hw * 0.12 + sway * 0.3,
+        base_y - h * 0.72,
+        tip_x,
+        tip_y,
     );
     cr.curve_to(
-        cx + hw * 0.12 + sway * 0.3, base_y - h * 0.72,
-        cx + hw * 1.15, base_y - h * 0.35,
-        cx + hw, base_y - base_r,
+        cx + hw * 0.12 + sway * 0.3,
+        base_y - h * 0.72,
+        cx + hw * 1.15,
+        base_y - h * 0.35,
+        cx + hw,
+        base_y - base_r,
     );
     cr.arc(cx, base_y - base_r, hw, 0.0, PI);
     cr.close_path();
@@ -493,13 +739,19 @@ fn draw_flame(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64) {
         let w = tongue.width * (0.85 + 0.15 * flicker);
         let hw = w / 2.0;
 
-        let sway = tongue.phase.sin() * FLAME_SWAY
-            + (tongue.phase * 1.7 + 1.0).sin() * FLAME_SWAY * 0.4;
+        let sway =
+            tongue.phase.sin() * FLAME_SWAY + (tongue.phase * 1.7 + 1.0).sin() * FLAME_SWAY * 0.4;
 
         let base_x = pill_x + inset + usable * tongue.t;
         let cx = base_x + sway * 0.3;
 
-        draw_flame_tongue(cr, cx, base_y, h * 1.2, hw * 1.5, sway * 1.1,
+        draw_flame_tongue(
+            cr,
+            cx,
+            base_y,
+            h * 1.2,
+            hw * 1.5,
+            sway * 1.1,
             &[
                 (0.0, 0.7, 0.7, 0.7, alpha * 0.15),
                 (0.4, 0.4, 0.4, 0.4, alpha * 0.08),
@@ -507,7 +759,13 @@ fn draw_flame(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64) {
             ],
         );
 
-        draw_flame_tongue(cr, cx, base_y, h, hw, sway,
+        draw_flame_tongue(
+            cr,
+            cx,
+            base_y,
+            h,
+            hw,
+            sway,
             &[
                 (0.0, 1.0, 1.0, 1.0, alpha * 0.85),
                 (0.25, 1.0, 1.0, 1.0, alpha * 0.65),
@@ -516,7 +774,13 @@ fn draw_flame(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64) {
             ],
         );
 
-        draw_flame_tongue(cr, cx, base_y, h * 0.55, hw * 0.35, sway * 0.5,
+        draw_flame_tongue(
+            cr,
+            cx,
+            base_y,
+            h * 0.55,
+            hw * 0.35,
+            sway * 0.5,
             &[
                 (0.0, 1.0, 1.0, 1.0, alpha * 0.95),
                 (0.5, 1.0, 1.0, 1.0, alpha * 0.5),
@@ -552,7 +816,14 @@ fn draw_fireworks(cr: &cairo::Context, state: &PillState, _ww: f64, _wh: f64) {
         if rocket.phase == RocketPhase::Rising {
             let hs = FIREWORKS_HEAD_SIZE / 2.0;
             cr.set_source_rgba(rc, gc, bc, 0.95);
-            rounded_rect(cr, rocket.x - hs, rocket.y - hs, FIREWORKS_HEAD_SIZE, FIREWORKS_HEAD_SIZE, hs);
+            rounded_rect(
+                cr,
+                rocket.x - hs,
+                rocket.y - hs,
+                FIREWORKS_HEAD_SIZE,
+                FIREWORKS_HEAD_SIZE,
+                hs,
+            );
             let _ = cr.fill();
         }
 
@@ -592,7 +863,11 @@ fn draw_assistant_panel(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64
     let is_compact = state.assistant_compact.get();
     let is_typing = *state.assistant_input_mode.borrow() == "type";
 
-    let panel_w = if is_compact { PANEL_COMPACT_WIDTH } else { PANEL_EXPANDED_WIDTH };
+    let panel_w = if is_compact {
+        PANEL_COMPACT_WIDTH
+    } else {
+        PANEL_EXPANDED_WIDTH
+    };
     let panel_x = (ww - panel_w) / 2.0;
     let panel_y = PANEL_TOP_MARGIN;
     let panel_h = wh - PANEL_TOP_MARGIN - PANEL_BOTTOM_MARGIN;
@@ -602,11 +877,25 @@ fn draw_assistant_panel(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64
 
     // Panel background
     cr.save().ok();
-    rounded_rect(cr, panel_x, panel_y + y_shift, panel_w, panel_h, PANEL_RADIUS);
+    rounded_rect(
+        cr,
+        panel_x,
+        panel_y + y_shift,
+        panel_w,
+        panel_h,
+        PANEL_RADIUS,
+    );
     cr.set_source_rgba(0.0, 0.0, 0.0, PANEL_BG_ALPHA * alpha);
     let _ = cr.fill();
 
-    rounded_rect(cr, panel_x + 0.5, panel_y + y_shift + 0.5, panel_w - 1.0, panel_h - 1.0, PANEL_RADIUS - 0.5);
+    rounded_rect(
+        cr,
+        panel_x + 0.5,
+        panel_y + y_shift + 0.5,
+        panel_w - 1.0,
+        panel_h - 1.0,
+        PANEL_RADIUS - 0.5,
+    );
     cr.set_source_rgba(1.0, 1.0, 1.0, PANEL_BORDER_ALPHA * alpha);
     cr.set_line_width(1.0);
     let _ = cr.stroke();
@@ -644,7 +933,9 @@ fn draw_assistant_panel(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64
             PILL_BOTTOM_INSET + EXPANDED_PILL_HEIGHT + SCROLL_BOTTOM_PAD
         };
 
-        draw_transcript(cr, state, content_x, py, content_w, scroll_h, alpha, top_pad, bottom_pad);
+        draw_transcript(
+            cr, state, content_x, py, content_w, scroll_h, alpha, top_pad, bottom_pad,
+        );
 
         // Top gradient: opaque over header area, fades into content
         let grad_h = PANEL_TRANSCRIPT_TOP_OFFSET + 16.0;
@@ -657,7 +948,11 @@ fn draw_assistant_panel(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64
         let _ = cr.fill();
 
         // Bottom gradient: opaque over pill/bottom area, fades into content
-        let bot_area = if is_typing { 0.0 } else { PILL_BOTTOM_INSET + EXPANDED_PILL_HEIGHT };
+        let bot_area = if is_typing {
+            0.0
+        } else {
+            PILL_BOTTOM_INSET + EXPANDED_PILL_HEIGHT
+        };
         let bot_grad_h = bot_area + 16.0;
         let bot_y = scroll_bottom - bot_grad_h;
         let bot_grad = cairo::LinearGradient::new(0.0, bot_y, 0.0, scroll_bottom);
@@ -676,11 +971,19 @@ fn draw_assistant_panel(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64
         }
 
         let open_x = panel_x + PANEL_HEADER_OFFSET_LEFT + HEADER_BUTTON_SIZE + 4.0;
-        draw_panel_button(cr, open_x, py + PANEL_HEADER_OFFSET_TOP,
-            HEADER_BUTTON_SIZE, alpha, ButtonIcon::OpenInNew);
+        draw_panel_button(
+            cr,
+            open_x,
+            py + PANEL_HEADER_OFFSET_TOP,
+            HEADER_BUTTON_SIZE,
+            alpha,
+            ButtonIcon::OpenInNew,
+        );
         state.click_regions.borrow_mut().push(ClickRegion {
-            x: open_x, y: py + PANEL_HEADER_OFFSET_TOP,
-            w: HEADER_BUTTON_SIZE, h: HEADER_BUTTON_SIZE,
+            x: open_x,
+            y: py + PANEL_HEADER_OFFSET_TOP,
+            w: HEADER_BUTTON_SIZE,
+            h: HEADER_BUTTON_SIZE,
             action: ClickAction::OpenInNew,
         });
 
@@ -716,7 +1019,10 @@ fn draw_assistant_panel(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64
 
             if has_text {
                 state.click_regions.borrow_mut().push(ClickRegion {
-                    x: send_x, y: send_y, w: send_btn_size, h: send_btn_size,
+                    x: send_x,
+                    y: send_y,
+                    w: send_btn_size,
+                    h: send_btn_size,
                     action: ClickAction::SendButton,
                 });
             }
@@ -724,24 +1030,44 @@ fn draw_assistant_panel(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64
     }
 
     // Close button drawn last so it's always on top of gradients
-    draw_panel_button(cr, panel_x + PANEL_HEADER_OFFSET_LEFT, py + PANEL_HEADER_OFFSET_TOP,
-        HEADER_BUTTON_SIZE, alpha, ButtonIcon::Close);
+    draw_panel_button(
+        cr,
+        panel_x + PANEL_HEADER_OFFSET_LEFT,
+        py + PANEL_HEADER_OFFSET_TOP,
+        HEADER_BUTTON_SIZE,
+        alpha,
+        ButtonIcon::Close,
+    );
     state.click_regions.borrow_mut().push(ClickRegion {
         x: panel_x + PANEL_HEADER_OFFSET_LEFT,
         y: py + PANEL_HEADER_OFFSET_TOP,
-        w: HEADER_BUTTON_SIZE, h: HEADER_BUTTON_SIZE,
+        w: HEADER_BUTTON_SIZE,
+        h: HEADER_BUTTON_SIZE,
         action: ClickAction::AssistantClose,
     });
 }
 
 fn draw_compact_content(
-    cr: &cairo::Context, panel_x: f64, panel_y: f64, panel_w: f64,
-    content_height: f64, alpha: f64, state: &PillState,
+    cr: &cairo::Context,
+    panel_x: f64,
+    panel_y: f64,
+    panel_w: f64,
+    content_height: f64,
+    alpha: f64,
+    state: &PillState,
 ) {
     let text = "What can I help you with?";
-    let text_alpha = if state.phase.get() == Phase::Recording { 0.96 } else { 0.8 };
+    let text_alpha = if state.phase.get() == Phase::Recording {
+        0.96
+    } else {
+        0.8
+    };
     cr.set_source_rgba(1.0, 1.0, 1.0, text_alpha * alpha);
-    cr.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    cr.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Normal,
+    );
     cr.set_font_size(18.0);
     let extents = cr.text_extents(text).unwrap();
     let tx = panel_x + (panel_w - extents.width()) / 2.0 - extents.x_bearing();
@@ -751,9 +1077,15 @@ fn draw_compact_content(
 }
 
 fn draw_transcript(
-    cr: &cairo::Context, state: &PillState,
-    area_x: f64, area_y: f64, area_w: f64, area_h: f64, alpha: f64,
-    top_pad: f64, bottom_pad: f64,
+    cr: &cairo::Context,
+    state: &PillState,
+    area_x: f64,
+    area_y: f64,
+    area_w: f64,
+    area_h: f64,
+    alpha: f64,
+    top_pad: f64,
+    bottom_pad: f64,
 ) {
     let messages = state.assistant_messages.borrow();
     let streaming = state.assistant_streaming.borrow();
@@ -770,7 +1102,11 @@ fn draw_transcript(
     let scroll = state.scroll_offset.get();
     let mut y = area_y + top_pad - scroll;
 
-    cr.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    cr.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Normal,
+    );
     cr.set_font_size(14.0);
 
     let line_height = 20.0;
@@ -793,7 +1129,9 @@ fn draw_transcript(
         }
 
         if msg.is_tool_result {
-            let tool_desc = msg.tool_description.as_deref()
+            let tool_desc = msg
+                .tool_description
+                .as_deref()
                 .or(msg.tool_name.as_deref())
                 .unwrap_or("Tool");
             let reason = msg.reason.as_deref().unwrap_or("");
@@ -804,7 +1142,11 @@ fn draw_transcript(
             };
 
             cr.set_source_rgba(1.0, 1.0, 1.0, 0.5 * alpha);
-            cr.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+            cr.select_font_face(
+                "sans-serif",
+                cairo::FontSlant::Normal,
+                cairo::FontWeight::Normal,
+            );
             cr.set_font_size(12.0);
 
             draw_wrench_icon(cr, area_x, y + 2.0, 12.0, 0.5 * alpha);
@@ -814,10 +1156,18 @@ fn draw_transcript(
             y += 18.0;
         } else if let Some(ref content) = msg.content {
             let color_alpha = if msg.is_error { 0.94 } else { 0.92 };
-            let (r, g, b) = if msg.is_error { (1.0, 0.4, 0.4) } else { (1.0, 1.0, 1.0) };
+            let (r, g, b) = if msg.is_error {
+                (1.0, 0.4, 0.4)
+            } else {
+                (1.0, 1.0, 1.0)
+            };
 
             cr.set_source_rgba(r, g, b, color_alpha * alpha);
-            cr.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+            cr.select_font_face(
+                "sans-serif",
+                cairo::FontSlant::Normal,
+                cairo::FontWeight::Normal,
+            );
             cr.set_font_size(14.0);
 
             let lines = wrap_text(cr, content, area_w);
@@ -843,10 +1193,18 @@ fn draw_transcript(
 }
 
 fn draw_streaming_activity(
-    cr: &cairo::Context, streaming: &PillStreaming,
-    x: f64, mut y: f64, _w: f64, alpha: f64,
+    cr: &cairo::Context,
+    streaming: &PillStreaming,
+    x: f64,
+    mut y: f64,
+    _w: f64,
+    alpha: f64,
 ) -> f64 {
-    cr.select_font_face("sans-serif", cairo::FontSlant::Italic, cairo::FontWeight::Normal);
+    cr.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Italic,
+        cairo::FontWeight::Normal,
+    );
     cr.set_font_size(12.0);
     cr.set_source_rgba(1.0, 1.0, 1.0, 0.5 * alpha);
 
@@ -862,7 +1220,11 @@ fn draw_streaming_activity(
     }
 
     if !streaming.reasoning.is_empty() {
-        let label = if streaming.is_streaming { "Thinking…" } else { "Thought process" };
+        let label = if streaming.is_streaming {
+            "Thinking…"
+        } else {
+            "Thought process"
+        };
         cr.move_to(x, y + 12.0);
         let _ = cr.show_text(label);
         y += 16.0;
@@ -871,11 +1233,13 @@ fn draw_streaming_activity(
     y
 }
 
-fn draw_thinking_text(
-    cr: &cairo::Context, x: f64, y: f64, alpha: f64, state: &PillState,
-) -> f64 {
+fn draw_thinking_text(cr: &cairo::Context, x: f64, y: f64, alpha: f64, state: &PillState) -> f64 {
     let text = "Thinking";
-    cr.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    cr.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Normal,
+    );
     cr.set_font_size(14.0);
     let extents = cr.text_extents(text).unwrap();
 
@@ -887,7 +1251,12 @@ fn draw_thinking_text(
     cr.clip();
 
     let grad_offset = shimmer * extents.width() * 4.0 - extents.width();
-    let gradient = cairo::LinearGradient::new(x + grad_offset, 0.0, x + grad_offset + extents.width() * 2.0, 0.0);
+    let gradient = cairo::LinearGradient::new(
+        x + grad_offset,
+        0.0,
+        x + grad_offset + extents.width() * 2.0,
+        0.0,
+    );
     gradient.add_color_stop_rgba(0.0, 1.0, 1.0, 1.0, 0.34 * alpha);
     gradient.add_color_stop_rgba(0.5, 1.0, 1.0, 1.0, 0.92 * alpha);
     gradient.add_color_stop_rgba(1.0, 1.0, 1.0, 1.0, 0.34 * alpha);
@@ -900,8 +1269,13 @@ fn draw_thinking_text(
 }
 
 fn draw_permission_card(
-    cr: &cairo::Context, state: &PillState, perm: &PillPermission,
-    x: f64, y: f64, w: f64, alpha: f64,
+    cr: &cairo::Context,
+    state: &PillState,
+    perm: &PillPermission,
+    x: f64,
+    y: f64,
+    w: f64,
+    alpha: f64,
 ) -> f64 {
     let card_h = PERM_CARD_HEIGHT;
 
@@ -916,14 +1290,22 @@ fn draw_permission_card(
 
     let tool_label = perm.description.as_deref().unwrap_or(&perm.tool_name);
     cr.set_source_rgba(1.0, 1.0, 1.0, 0.82 * alpha);
-    cr.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
+    cr.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Bold,
+    );
     cr.set_font_size(12.0);
     cr.move_to(x + 12.0, y + 18.0);
     let _ = cr.show_text(tool_label);
 
     if let Some(ref reason) = perm.reason {
         cr.set_source_rgba(1.0, 1.0, 1.0, 0.5 * alpha);
-        cr.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+        cr.select_font_face(
+            "sans-serif",
+            cairo::FontSlant::Normal,
+            cairo::FontWeight::Normal,
+        );
         cr.set_font_size(11.0);
         cr.move_to(x + 12.0, y + 32.0);
         let _ = cr.show_text(reason);
@@ -934,23 +1316,41 @@ fn draw_permission_card(
     let mut btn_x = x + w - 12.0;
 
     for (i, (label, text_alpha)) in btn_labels.iter().rev().enumerate() {
-        let btn_w = if i == 0 { PERM_BUTTON_WIDTH + 16.0 } else { PERM_BUTTON_WIDTH };
+        let btn_w = if i == 0 {
+            PERM_BUTTON_WIDTH + 16.0
+        } else {
+            PERM_BUTTON_WIDTH
+        };
         btn_x -= btn_w;
 
         rounded_rect(cr, btn_x, btn_y, btn_w, PERM_BUTTON_HEIGHT, 6.0);
         cr.set_source_rgba(1.0, 1.0, 1.0, 0.08 * alpha);
         let _ = cr.fill();
 
-        rounded_rect(cr, btn_x + 0.5, btn_y + 0.5, btn_w - 1.0, PERM_BUTTON_HEIGHT - 1.0, 5.5);
+        rounded_rect(
+            cr,
+            btn_x + 0.5,
+            btn_y + 0.5,
+            btn_w - 1.0,
+            PERM_BUTTON_HEIGHT - 1.0,
+            5.5,
+        );
         cr.set_source_rgba(1.0, 1.0, 1.0, 0.15 * alpha);
         cr.set_line_width(1.0);
         let _ = cr.stroke();
 
         cr.set_source_rgba(1.0, 1.0, 1.0, text_alpha * alpha);
-        cr.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+        cr.select_font_face(
+            "sans-serif",
+            cairo::FontSlant::Normal,
+            cairo::FontWeight::Normal,
+        );
         cr.set_font_size(11.0);
         let ext = cr.text_extents(label).unwrap();
-        cr.move_to(btn_x + (btn_w - ext.width()) / 2.0 - ext.x_bearing(), btn_y + (PERM_BUTTON_HEIGHT - ext.height()) / 2.0 - ext.y_bearing());
+        cr.move_to(
+            btn_x + (btn_w - ext.width()) / 2.0 - ext.x_bearing(),
+            btn_y + (PERM_BUTTON_HEIGHT - ext.height()) / 2.0 - ext.y_bearing(),
+        );
         let _ = cr.show_text(label);
 
         let action = match 2 - i {
@@ -959,7 +1359,11 @@ fn draw_permission_card(
             _ => ClickAction::PermissionAlwaysAllow(perm.id.clone()),
         };
         state.click_regions.borrow_mut().push(ClickRegion {
-            x: btn_x, y: btn_y, w: btn_w, h: PERM_BUTTON_HEIGHT, action,
+            x: btn_x,
+            y: btn_y,
+            w: btn_w,
+            h: PERM_BUTTON_HEIGHT,
+            action,
         });
 
         btn_x -= PERM_BUTTON_GAP;
@@ -969,11 +1373,19 @@ fn draw_permission_card(
 }
 
 fn draw_user_prompt_preview(
-    cr: &cairo::Context, panel_x: f64, panel_y: f64, panel_w: f64,
-    prompt: &str, alpha: f64,
+    cr: &cairo::Context,
+    panel_x: f64,
+    panel_y: f64,
+    panel_w: f64,
+    prompt: &str,
+    alpha: f64,
 ) {
     cr.set_source_rgba(1.0, 1.0, 1.0, 0.5 * alpha);
-    cr.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    cr.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Normal,
+    );
     cr.set_font_size(14.0);
 
     let max_w = panel_w * 0.5;
@@ -989,7 +1401,9 @@ fn draw_user_prompt_preview(
 
     let ext = cr.text_extents(&display).unwrap();
     let tx = panel_x + panel_w - PANEL_HEADER_OFFSET_RIGHT - ext.width() - ext.x_bearing();
-    let ty = panel_y + PANEL_HEADER_OFFSET_TOP + HEADER_BUTTON_SIZE / 2.0 - ext.height() / 2.0 - ext.y_bearing();
+    let ty = panel_y + PANEL_HEADER_OFFSET_TOP + HEADER_BUTTON_SIZE / 2.0
+        - ext.height() / 2.0
+        - ext.y_bearing();
     cr.move_to(tx, ty);
     let _ = cr.show_text(&display);
 }
@@ -1000,10 +1414,7 @@ enum ButtonIcon {
     OpenInNew,
 }
 
-fn draw_panel_button(
-    cr: &cairo::Context,
-    x: f64, y: f64, size: f64, alpha: f64, icon: ButtonIcon,
-) {
+fn draw_panel_button(cr: &cairo::Context, x: f64, y: f64, size: f64, alpha: f64, icon: ButtonIcon) {
     rounded_rect(cr, x, y, size, size, size / 4.0);
     cr.set_source_rgba(1.0, 1.0, 1.0, 0.06 * alpha);
     let _ = cr.fill();
@@ -1063,11 +1474,23 @@ fn draw_keyboard_button(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64
     cr.scale(scale, scale);
     cr.translate(-(KB_BUTTON_SIZE / 2.0), -(KB_BUTTON_SIZE / 2.0));
 
-    cr.arc(KB_BUTTON_SIZE / 2.0, KB_BUTTON_SIZE / 2.0, KB_BUTTON_SIZE / 2.0, 0.0, TAU);
+    cr.arc(
+        KB_BUTTON_SIZE / 2.0,
+        KB_BUTTON_SIZE / 2.0,
+        KB_BUTTON_SIZE / 2.0,
+        0.0,
+        TAU,
+    );
     cr.set_source_rgba(0.0, 0.0, 0.0, 0.92 * alpha);
     let _ = cr.fill();
 
-    cr.arc(KB_BUTTON_SIZE / 2.0, KB_BUTTON_SIZE / 2.0, KB_BUTTON_SIZE / 2.0 - 0.5, 0.0, TAU);
+    cr.arc(
+        KB_BUTTON_SIZE / 2.0,
+        KB_BUTTON_SIZE / 2.0,
+        KB_BUTTON_SIZE / 2.0 - 0.5,
+        0.0,
+        TAU,
+    );
     cr.set_source_rgba(1.0, 1.0, 1.0, BORDER_ALPHA * alpha);
     cr.set_line_width(1.0);
     let _ = cr.stroke();
@@ -1101,7 +1524,10 @@ fn draw_keyboard_button(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64
 
     if kb_t > 0.5 {
         state.click_regions.borrow_mut().push(ClickRegion {
-            x: btn_x, y: btn_y, w: KB_BUTTON_SIZE, h: KB_BUTTON_SIZE,
+            x: btn_x,
+            y: btn_y,
+            w: KB_BUTTON_SIZE,
+            h: KB_BUTTON_SIZE,
             action: ClickAction::KeyboardButton,
         });
     }
@@ -1144,7 +1570,10 @@ fn draw_cancel_button(cr: &cairo::Context, state: &PillState, ww: f64, wh: f64) 
 
     if t > 0.5 {
         state.click_regions.borrow_mut().push(ClickRegion {
-            x: btn_x, y: btn_y, w: CANCEL_BUTTON_SIZE, h: CANCEL_BUTTON_SIZE,
+            x: btn_x,
+            y: btn_y,
+            w: CANCEL_BUTTON_SIZE,
+            h: CANCEL_BUTTON_SIZE,
             action: ClickAction::CancelDictation,
         });
     }
@@ -1266,7 +1695,11 @@ fn draw_broadcast_transcript(cr: &cairo::Context, state: &PillState, ww: f64, wh
         return;
     }
 
-    cr.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    cr.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Normal,
+    );
     cr.set_font_size(TRANSCRIPT_FONT_SIZE);
     let extents = match cr.text_extents(&text) {
         Ok(e) => e,
@@ -1280,7 +1713,14 @@ fn draw_broadcast_transcript(cr: &cairo::Context, state: &PillState, ww: f64, wh
     let rise = (1.0 - alpha) * 6.0;
     let box_y = pill_y - TRANSCRIPT_GAP - TRANSCRIPT_HEIGHT + rise;
 
-    rounded_rect(cr, box_x, box_y, box_w, TRANSCRIPT_HEIGHT, TRANSCRIPT_RADIUS);
+    rounded_rect(
+        cr,
+        box_x,
+        box_y,
+        box_w,
+        TRANSCRIPT_HEIGHT,
+        TRANSCRIPT_RADIUS,
+    );
     cr.set_source_rgba(0.0, 0.0, 0.0, alpha);
     let _ = cr.fill();
 
