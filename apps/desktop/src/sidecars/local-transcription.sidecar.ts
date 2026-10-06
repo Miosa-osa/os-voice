@@ -393,9 +393,6 @@ export class LocalTranscriptionSidecar extends BaseSidecar {
         }
 
         finalizePromise = (async () => {
-          // Push whatever is still buffered before waiting, or the tail of the
-          // recording (up to one batch) would never reach the sidecar.
-          flushPending(true);
           await queue;
           if (queuedError) {
             getLogger().warning(

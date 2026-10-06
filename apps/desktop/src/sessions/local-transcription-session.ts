@@ -22,6 +22,7 @@ import {
 } from "../utils/prompt.utils";
 import { mapDictationLanguageToWhisperLanguage } from "../utils/language.utils";
 import { loadMyEffectiveDictationLanguage } from "../utils/user.utils";
+import { createRollingTranscriptionSession } from "./rolling-transcription";
 
 type AudioChunkPayload = {
   samples: number[];
@@ -53,15 +54,19 @@ export class LocalTranscriptionSession implements TranscriptionSession {
       });
 
       const settings = state.settings.aiTranscription;
-      const sidecarSession =
-        await getLocalTranscriptionSidecarManager().createStreamingSession({
+      const preferGpu = isGpuPreferredTranscriptionDevice(settings.device);
+      const createSession = () =>
+        getLocalTranscriptionSidecarManager().createStreamingSession({
           model: normalizeLocalWhisperModel(settings.modelSize),
-          preferGpu: isGpuPreferredTranscriptionDevice(settings.device),
+          preferGpu,
           sampleRate,
           language: whisperLanguage,
           initialPrompt: prompt || undefined,
           deviceId: getTranscriptionSidecarDeviceId(settings.device),
         });
+      const sidecarSession = preferGpu
+        ? await createRollingTranscriptionSession(createSession, sampleRate)
+        : await createSession();
 
       this.session = sidecarSession;
       this.context = { prompt };
@@ -151,9 +156,7 @@ export class LocalTranscriptionSession implements TranscriptionSession {
     audio: StopRecordingResponse,
     warnings: string[],
   ): Promise<TranscriptionSessionResult> {
-    const payloadSamples = Array.isArray(audio.samples)
-      ? audio.samples
-      : Array.from(audio.samples ?? []);
+    const payloadSamples = audio.samples;
     const rate = audio.sampleRate;
 
     if (rate == null || rate <= 0 || payloadSamples.length === 0) {
