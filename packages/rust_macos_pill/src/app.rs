@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 
 use cocoa::appkit::{
-    NSApp, NSApplication, NSApplicationActivationPolicyAccessory, NSBackingStoreBuffered,
-    NSWindow, NSWindowCollectionBehavior,
+    NSApp, NSApplication, NSApplicationActivationPolicyAccessory, NSBackingStoreBuffered, NSWindow,
+    NSWindowCollectionBehavior,
 };
 use cocoa::base::{id, nil, NO, YES};
 use cocoa::foundation::{NSAutoreleasePool, NSPoint, NSRect, NSSize, NSString};
@@ -22,12 +22,23 @@ use crate::state::{FlameTongue, PillState, Rocket, RocketPhase, Spark, WindowMod
 
 // ── CVDisplayLink & timing ───────────────────────────────────────
 
+/// How often the pill re-asserts its front order while visible. Re-ordering
+/// every frame is what wedged the app; a slow heartbeat keeps recovery.
+const ORDER_REASSERT_SECS: f64 = 2.0;
+
 #[link(name = "CoreVideo", kind = "framework")]
 extern "C" {
     fn CVDisplayLinkCreateWithActiveCGDisplays(link_out: *mut *mut c_void) -> i32;
     fn CVDisplayLinkSetOutputCallback(
         link: *mut c_void,
-        callback: extern "C" fn(*mut c_void, *const c_void, *const c_void, u64, *mut u64, *mut c_void) -> i32,
+        callback: extern "C" fn(
+            *mut c_void,
+            *const c_void,
+            *const c_void,
+            u64,
+            *mut u64,
+            *mut c_void,
+        ) -> i32,
         context: *mut c_void,
     ) -> i32;
     fn CVDisplayLinkStart(link: *mut c_void) -> i32;
@@ -65,8 +76,12 @@ fn with_ctx<R>(f: impl FnOnce(&AppContext) -> R) -> Option<R> {
 static NEEDS_TICK: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn display_link_callback(
-    _link: *mut c_void, _now: *const c_void, _output_time: *const c_void,
-    _flags_in: u64, _flags_out: *mut u64, _context: *mut c_void,
+    _link: *mut c_void,
+    _now: *const c_void,
+    _output_time: *const c_void,
+    _flags_in: u64,
+    _flags_out: *mut u64,
+    _context: *mut c_void,
 ) -> i32 {
     if !NEEDS_TICK.swap(true, Ordering::Release) {
         unsafe {
@@ -89,19 +104,55 @@ fn register_pill_view_class() -> &'static Class {
     let mut decl = ClassDecl::new("VoquillPillView", superclass).unwrap();
 
     unsafe {
-        decl.add_method(sel!(drawRect:), draw_rect as extern "C" fn(&Object, Sel, NSRect));
-        decl.add_method(sel!(isFlipped), is_flipped as extern "C" fn(&Object, Sel) -> BOOL);
-        decl.add_method(sel!(acceptsFirstResponder), accepts_first_responder as extern "C" fn(&Object, Sel) -> BOOL);
-        decl.add_method(sel!(acceptsFirstMouse:), accepts_first_mouse as extern "C" fn(&Object, Sel, id) -> BOOL);
-        decl.add_method(sel!(mouseDown:), mouse_down as extern "C" fn(&Object, Sel, id));
-        decl.add_method(sel!(mouseEntered:), mouse_entered as extern "C" fn(&Object, Sel, id));
-        decl.add_method(sel!(mouseExited:), mouse_exited as extern "C" fn(&Object, Sel, id));
+        decl.add_method(
+            sel!(drawRect:),
+            draw_rect as extern "C" fn(&Object, Sel, NSRect),
+        );
+        decl.add_method(
+            sel!(isFlipped),
+            is_flipped as extern "C" fn(&Object, Sel) -> BOOL,
+        );
+        decl.add_method(
+            sel!(acceptsFirstResponder),
+            accepts_first_responder as extern "C" fn(&Object, Sel) -> BOOL,
+        );
+        decl.add_method(
+            sel!(acceptsFirstMouse:),
+            accepts_first_mouse as extern "C" fn(&Object, Sel, id) -> BOOL,
+        );
+        decl.add_method(
+            sel!(mouseDown:),
+            mouse_down as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(mouseEntered:),
+            mouse_entered as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(mouseExited:),
+            mouse_exited as extern "C" fn(&Object, Sel, id),
+        );
         decl.add_method(sel!(mouseUp:), mouse_up as extern "C" fn(&Object, Sel, id));
-        decl.add_method(sel!(scrollWheel:), scroll_wheel as extern "C" fn(&Object, Sel, id));
-        decl.add_method(sel!(updateTrackingAreas), update_tracking_areas as extern "C" fn(&Object, Sel));
-        decl.add_method(sel!(tick:), tick_callback as extern "C" fn(&Object, Sel, id));
-        decl.add_method(sel!(hitTest:), hit_test as extern "C" fn(&Object, Sel, NSPoint) -> id);
-        decl.add_method(sel!(textFieldAction:), text_field_action as extern "C" fn(&Object, Sel, id));
+        decl.add_method(
+            sel!(scrollWheel:),
+            scroll_wheel as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(updateTrackingAreas),
+            update_tracking_areas as extern "C" fn(&Object, Sel),
+        );
+        decl.add_method(
+            sel!(tick:),
+            tick_callback as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(hitTest:),
+            hit_test as extern "C" fn(&Object, Sel, NSPoint) -> id,
+        );
+        decl.add_method(
+            sel!(textFieldAction:),
+            text_field_action as extern "C" fn(&Object, Sel, id),
+        );
     }
 
     decl.register()
@@ -112,7 +163,10 @@ fn register_pill_window_class() -> &'static Class {
     let mut decl = ClassDecl::new("VoquillPillWindow", superclass).unwrap();
 
     unsafe {
-        decl.add_method(sel!(canBecomeKeyWindow), can_become_key_window as extern "C" fn(&Object, Sel) -> BOOL);
+        decl.add_method(
+            sel!(canBecomeKeyWindow),
+            can_become_key_window as extern "C" fn(&Object, Sel) -> BOOL,
+        );
     }
 
     decl.register()
@@ -130,10 +184,13 @@ extern "C" fn accepts_first_responder(_this: &Object, _sel: Sel) -> BOOL {
 
 extern "C" fn can_become_key_window(_this: &Object, _sel: Sel) -> BOOL {
     let is_typing = with_ctx(|ctx| {
-        ctx.state.assistant_active.get()
-            && *ctx.state.assistant_input_mode.borrow() == "type"
+        ctx.state.assistant_active.get() && *ctx.state.assistant_input_mode.borrow() == "type"
     });
-    if is_typing.unwrap_or(false) { YES } else { NO }
+    if is_typing.unwrap_or(false) {
+        YES
+    } else {
+        NO
+    }
 }
 
 extern "C" fn accepts_first_mouse(_this: &Object, _sel: Sel, _event: id) -> BOOL {
@@ -145,14 +202,12 @@ extern "C" fn mouse_down(_this: &Object, _sel: Sel, _event: id) {
 }
 
 extern "C" fn draw_rect(this: &Object, _sel: Sel, _dirty: NSRect) {
-    with_ctx(|ctx| {
-        unsafe {
-            let ns_ctx: id = msg_send![class!(NSGraphicsContext), currentContext];
-            let cg_ctx: gfx::CGContextRef = msg_send![ns_ctx, CGContext];
-            let bounds: NSRect = msg_send![this, bounds];
-            let gfx_ctx = Ctx::new(cg_ctx);
-            draw::draw_all(&gfx_ctx, &ctx.state, bounds.size.width, bounds.size.height);
-        }
+    with_ctx(|ctx| unsafe {
+        let ns_ctx: id = msg_send![class!(NSGraphicsContext), currentContext];
+        let cg_ctx: gfx::CGContextRef = msg_send![ns_ctx, CGContext];
+        let bounds: NSRect = msg_send![this, bounds];
+        let gfx_ctx = Ctx::new(cg_ctx);
+        draw::draw_all(&gfx_ctx, &ctx.state, bounds.size.width, bounds.size.height);
     });
 }
 
@@ -168,27 +223,23 @@ extern "C" fn mouse_exited(_this: &Object, _sel: Sel, _event: id) {
 }
 
 extern "C" fn mouse_up(_this: &Object, _sel: Sel, event: id) {
-    with_ctx(|ctx| {
-        unsafe {
-            let loc: NSPoint = msg_send![event, locationInWindow];
-            let view_loc: NSPoint = msg_send![_this, convertPoint:loc fromView:nil];
-            input::handle_click(&ctx.state, view_loc.x, view_loc.y);
-        }
+    with_ctx(|ctx| unsafe {
+        let loc: NSPoint = msg_send![event, locationInWindow];
+        let view_loc: NSPoint = msg_send![_this, convertPoint:loc fromView:nil];
+        input::handle_click(&ctx.state, view_loc.x, view_loc.y);
     });
 }
 
 extern "C" fn scroll_wheel(_this: &Object, _sel: Sel, event: id) {
-    with_ctx(|ctx| {
-        unsafe {
-            let precise: bool = msg_send![event, hasPreciseScrollingDeltas];
-            let dy: f64 = if precise {
-                msg_send![event, scrollingDeltaY]
-            } else {
-                let line_dy: f64 = msg_send![event, deltaY];
-                line_dy * 30.0
-            };
-            input::handle_scroll(&ctx.state, dy);
-        }
+    with_ctx(|ctx| unsafe {
+        let precise: bool = msg_send![event, hasPreciseScrollingDeltas];
+        let dy: f64 = if precise {
+            msg_send![event, scrollingDeltaY]
+        } else {
+            let line_dy: f64 = msg_send![event, deltaY];
+            line_dy * 30.0
+        };
+        input::handle_scroll(&ctx.state, dy);
     });
 }
 
@@ -217,11 +268,9 @@ extern "C" fn update_tracking_areas(this: &Object, _sel: Sel) {
 }
 
 extern "C" fn hit_test(this: &Object, _sel: Sel, point: NSPoint) -> id {
-    let interactive = with_ctx(|ctx| {
-        unsafe {
-            let local: NSPoint = msg_send![this, convertPoint:point fromView:nil];
-            input::is_interactive_at(&ctx.state, local.x, local.y)
-        }
+    let interactive = with_ctx(|ctx| unsafe {
+        let local: NSPoint = msg_send![this, convertPoint:point fromView:nil];
+        input::is_interactive_at(&ctx.state, local.x, local.y)
     });
 
     if interactive.unwrap_or(false) {
@@ -235,17 +284,19 @@ extern "C" fn hit_test(this: &Object, _sel: Sel, point: NSPoint) -> id {
 }
 
 extern "C" fn text_field_action(_this: &Object, _sel: Sel, sender: id) {
-    with_ctx(|ctx| {
-        unsafe {
-            let ns_text: id = msg_send![sender, stringValue];
-            let cstr: *const std::os::raw::c_char = msg_send![ns_text, UTF8String];
-            let text = std::ffi::CStr::from_ptr(cstr).to_str().unwrap_or("").trim().to_string();
-            if !text.is_empty() {
-                ipc::send(&OutMessage::TypedMessage { text });
-                let empty: id = NSString::alloc(nil).init_str("");
-                let _: () = msg_send![sender, setStringValue:empty];
-                *ctx.state.entry_text.borrow_mut() = String::new();
-            }
+    with_ctx(|ctx| unsafe {
+        let ns_text: id = msg_send![sender, stringValue];
+        let cstr: *const std::os::raw::c_char = msg_send![ns_text, UTF8String];
+        let text = std::ffi::CStr::from_ptr(cstr)
+            .to_str()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if !text.is_empty() {
+            ipc::send(&OutMessage::TypedMessage { text });
+            let empty: id = NSString::alloc(nil).init_str("");
+            let _: () = msg_send![sender, setStringValue:empty];
+            *ctx.state.entry_text.borrow_mut() = String::new();
         }
     });
 }
@@ -263,7 +314,11 @@ fn perform_tick() {
         let now = unsafe { CFAbsoluteTimeGetCurrent() };
         let prev = ctx.last_tick_time.get();
         ctx.last_tick_time.set(now);
-        let dt = if prev == 0.0 { 1.0 / 60.0 } else { (now - prev).clamp(0.001, 0.05) };
+        let dt = if prev == 0.0 {
+            1.0 / 60.0
+        } else {
+            (now - prev).clamp(0.001, 0.05)
+        };
 
         // Process IPC messages
         let rx = ctx.receiver.borrow();
@@ -272,11 +327,37 @@ fn perform_tick() {
                 InMessage::Phase { phase } => {
                     let prev = ctx.state.phase.get();
                     ctx.state.phase.set(phase);
+                    if phase == Phase::Recording && prev != Phase::Recording {
+                        ctx.state
+                            .recording_started
+                            .set(Some(std::time::Instant::now()));
+                    }
+                    if phase == Phase::Idle {
+                        ctx.state.recording_started.set(None);
+                    }
+
                     if phase == Phase::Idle && prev != Phase::Idle {
                         ctx.state.target_level.set(0.0);
                         ctx.state.current_level.set(0.0);
                         ctx.state.wave_phase.set(0.0);
                     }
+                }
+                InMessage::Completed => match ctx.state.theme.borrow().effect {
+                    rust_pill_style::CompletionEffect::None => {}
+                    rust_pill_style::CompletionEffect::Sparkle => {
+                        ctx.state.sparkle_active.set(true);
+                        ctx.state.sparkle_elapsed.set(0.0);
+                    }
+                    rust_pill_style::CompletionEffect::Fireworks => {
+                        ctx.state.fireworks_active.set(true);
+                        ctx.state.fireworks_elapsed.set(0.0);
+                        ctx.state.fireworks_next_launch.set(0);
+                        ctx.state.fireworks_rockets.borrow_mut().clear();
+                    }
+                },
+                InMessage::Theme { theme, preview } => {
+                    *ctx.state.theme.borrow_mut() = theme.theme();
+                    ctx.state.preview.set(preview);
                 }
                 InMessage::Levels { levels } => {
                     *ctx.state.pending_levels.borrow_mut() = levels;
@@ -285,11 +366,21 @@ fn perform_tick() {
                     ctx.state.style_count.set(count);
                     *ctx.state.style_name.borrow_mut() = name;
                 }
-                InMessage::Toast { message, toast_type, duration, action, action_label } => {
+                InMessage::Toast {
+                    message,
+                    toast_type,
+                    duration,
+                    action,
+                    action_label,
+                } => {
                     *ctx.state.flash_message.borrow_mut() = message;
-                    ctx.state.flash_is_error.set(toast_type.as_deref() == Some("error"));
+                    ctx.state
+                        .flash_is_error
+                        .set(toast_type.as_deref() == Some("error"));
                     ctx.state.flash_visible.set(true);
-                    ctx.state.flash_timer.set(duration.unwrap_or(FLASH_DURATION));
+                    ctx.state
+                        .flash_timer
+                        .set(duration.unwrap_or(FLASH_DURATION));
                     *ctx.state.flash_action.borrow_mut() = action;
                     *ctx.state.flash_action_label.borrow_mut() = action_label;
                 }
@@ -390,8 +481,8 @@ fn perform_tick() {
         tick(&ctx.state, dt);
 
         // Show/hide entry for typing mode
-        let is_typing = ctx.state.assistant_active.get()
-            && *ctx.state.assistant_input_mode.borrow() == "type";
+        let is_typing =
+            ctx.state.assistant_active.get() && *ctx.state.assistant_input_mode.borrow() == "type";
         unsafe {
             let entry = ctx.entry;
             let entry_hidden: BOOL = msg_send![entry, isHidden];
@@ -408,7 +499,10 @@ fn perform_tick() {
             if is_typing {
                 let ns_text: id = msg_send![entry, stringValue];
                 let cstr: *const std::os::raw::c_char = msg_send![ns_text, UTF8String];
-                let text = std::ffi::CStr::from_ptr(cstr).to_str().unwrap_or("").to_string();
+                let text = std::ffi::CStr::from_ptr(cstr)
+                    .to_str()
+                    .unwrap_or("")
+                    .to_string();
                 *ctx.state.entry_text.borrow_mut() = text;
             }
         }
@@ -417,21 +511,45 @@ fn perform_tick() {
         let visibility = ctx.state.visibility.get();
         let is_active = ctx.state.phase.get() != Phase::Idle;
         let is_assistant = ctx.state.assistant_active.get();
-        let should_show = match visibility {
-            Visibility::Hidden => is_assistant,
-            Visibility::WhileActive => is_active || is_assistant,
-            Visibility::Persistent => true,
-        };
-        unsafe {
-            if should_show {
+        let should_show = ctx.state.is_previewing()
+            || match visibility {
+                Visibility::Hidden => is_assistant,
+                Visibility::WhileActive => {
+                    is_active
+                        || is_assistant
+                        || ctx.state.sparkle_active.get()
+                        || ctx.state.fireworks_active.get()
+                        || !ctx.state.fireworks_rockets.borrow().is_empty()
+                }
+                Visibility::Persistent => true,
+            };
+        // Order the window only on a real shown/hidden transition, plus a slow
+        // heartbeat. See `window_order_action` for why this must not run every
+        // frame — re-issuing orderFront: per refresh pegs the main thread.
+        let was_ordered = ctx.state.window_ordered_front.get();
+        let last_assert = ctx.state.last_order_assert.get();
+        match crate::state::window_order_action(
+            should_show,
+            was_ordered,
+            now,
+            last_assert,
+            ORDER_REASSERT_SECS,
+        ) {
+            crate::state::WindowOrderAction::OrderFront => unsafe {
                 let _: () = msg_send![ctx.window, orderFront:nil];
-            } else {
+                ctx.state.window_ordered_front.set(true);
+                ctx.state.last_order_assert.set(now);
+            },
+            crate::state::WindowOrderAction::OrderOut => unsafe {
                 let _: () = msg_send![ctx.window, orderOut:nil];
-            }
+                ctx.state.window_ordered_front.set(false);
+                ctx.state.last_order_assert.set(now);
+            },
+            crate::state::WindowOrderAction::None => {}
         }
 
         // Reposition window on active monitor
-        reposition_window(ctx.window);
+        reposition_window(ctx.window, &ctx.state);
 
         // Request redraw
         unsafe {
@@ -454,22 +572,41 @@ fn update_hover(view: id, ctx: &AppContext) {
     let was_hovered = ctx.state.hovered.get();
     if new_hovered != was_hovered {
         ctx.state.hovered.set(new_hovered);
-        ipc::send(&OutMessage::Hover { hovered: new_hovered });
+        ipc::send(&OutMessage::Hover {
+            hovered: new_hovered,
+        });
     }
 }
 
 // ── Animation tick ────────────────────────────────────────────────
 
 fn tick(state: &PillState, dt: f64) {
+    state
+        .rainbow_clock
+        .set((state.rainbow_clock.get() + dt) % 1000.0);
+    if state.sparkle_active.get() {
+        let elapsed = state.sparkle_elapsed.get() + dt;
+        state.sparkle_elapsed.set(elapsed);
+        if elapsed >= 0.9 {
+            state.sparkle_active.set(false);
+        }
+    }
+    let previewing = state.is_previewing();
     let phase = state.phase.get();
-    let is_active = phase != Phase::Idle;
+    let is_active = phase != Phase::Idle || previewing;
     let is_recording = phase == Phase::Recording;
     let is_loading = phase == Phase::Loading;
     let hovered = state.hovered.get();
     let frame_scale = dt * 60.0; // Scale factor relative to 60fps baseline
 
     // Audio levels (frame-rate independent)
-    if is_recording {
+    if previewing {
+        let clock = state.preview_clock.get() + dt;
+        state.preview_clock.set(clock);
+        state
+            .target_level
+            .set((0.4 + 0.25 * (clock * 2.3).sin() + 0.15 * (clock * 7.1).sin()).clamp(0.1, 1.0));
+    } else if is_recording {
         let levels = state.pending_levels.borrow();
         if !levels.is_empty() {
             let sum: f64 = levels.iter().map(|v| *v as f64).sum();
@@ -479,14 +616,18 @@ fn tick(state: &PillState, dt: f64) {
             let boosted = (combined.sqrt() * 1.35).min(1.0);
             let target = state.target_level.get();
             let mix = 1.0 - 0.25_f64.powf(frame_scale);
-            state.target_level.set((target * (1.0 - mix) + boosted * mix).min(1.0));
+            state
+                .target_level
+                .set((target * (1.0 - mix) + boosted * mix).min(1.0));
         }
     } else if is_loading {
         let target = state.target_level.get();
         state.target_level.set(target.max(PROCESSING_BASE_LEVEL));
     } else {
         state.target_level.set(0.0);
-        state.current_level.set(state.current_level.get() * 0.4_f64.powf(frame_scale));
+        state
+            .current_level
+            .set(state.current_level.get() * 0.4_f64.powf(frame_scale));
         if state.current_level.get() < 0.0002 {
             state.current_level.set(0.0);
         }
@@ -496,25 +637,51 @@ fn tick(state: &PillState, dt: f64) {
     let target = state.target_level.get();
     let smoothing = 1.0 - (1.0 - LEVEL_SMOOTHING).powf(frame_scale);
     let new_current = current + (target - current) * smoothing;
-    state.current_level.set(if new_current < 0.0002 { 0.0 } else { new_current });
+    state.current_level.set(if new_current < 0.0002 {
+        0.0
+    } else {
+        new_current
+    });
 
     let decay = TARGET_DECAY_PER_FRAME.powf(frame_scale);
     let decayed = target * decay;
-    state.target_level.set(if decayed < 0.0005 { 0.0 } else { decayed });
+    state
+        .target_level
+        .set(if decayed < 0.0005 { 0.0 } else { decayed });
 
     let level = state.current_level.get();
-    let base_level = if is_loading && !is_recording { PROCESSING_BASE_LEVEL } else { 0.0 };
+    let base_level = if is_loading && !is_recording {
+        PROCESSING_BASE_LEVEL
+    } else {
+        0.0
+    };
     let effective_level = level.max(base_level);
-    let advance = (WAVE_BASE_PHASE_STEP + WAVE_PHASE_GAIN * effective_level) * frame_scale;
-    state.wave_phase.set((state.wave_phase.get() + advance) % TAU);
+    let advance = (WAVE_BASE_PHASE_STEP + WAVE_PHASE_GAIN * effective_level)
+        * frame_scale
+        * state.theme.borrow().speed;
+    state
+        .wave_phase
+        .set((state.wave_phase.get() + advance) % TAU);
 
     // Pill expand/collapse (spring)
-    let expand_target = if is_active || hovered || state.assistant_active.get() { 1.0 } else { 0.0 };
-    spring_anim(&state.expand_t, &state.expand_velocity, expand_target, SPRING_STIFFNESS, dt);
+    let expand_target = if is_active || hovered || state.assistant_active.get() {
+        1.0
+    } else {
+        0.0
+    };
+    spring_anim(
+        &state.expand_t,
+        &state.expand_velocity,
+        expand_target,
+        SPRING_STIFFNESS,
+        dt,
+    );
 
     // Loading offset
     if is_loading {
-        state.loading_offset.set((state.loading_offset.get() + LOADING_SPEED * frame_scale) % 1.0);
+        state
+            .loading_offset
+            .set((state.loading_offset.get() + LOADING_SPEED * frame_scale) % 1.0);
     }
 
     // Tooltip animation (spring)
@@ -523,25 +690,65 @@ fn tick(state: &PillState, dt: f64) {
         && (hovered || phase == Phase::Recording)
         && state.expand_t.get() > 0.3;
     let tooltip_target = if show_tooltip { 1.0 } else { 0.0 };
-    spring_anim(&state.tooltip_t, &state.tooltip_velocity, tooltip_target, SPRING_STIFFNESS, dt);
+    spring_anim(
+        &state.tooltip_t,
+        &state.tooltip_velocity,
+        tooltip_target,
+        SPRING_STIFFNESS,
+        dt,
+    );
 
     // Panel open/close (spring)
-    let panel_target = if state.assistant_active.get() { 1.0 } else { 0.0 };
-    spring_anim(&state.panel_open_t, &state.panel_open_velocity, panel_target, SPRING_STIFFNESS, dt);
+    let panel_target = if state.assistant_active.get() {
+        1.0
+    } else {
+        0.0
+    };
+    spring_anim(
+        &state.panel_open_t,
+        &state.panel_open_velocity,
+        panel_target,
+        SPRING_STIFFNESS,
+        dt,
+    );
 
     // Keyboard button (spring)
     let is_voice = *state.assistant_input_mode.borrow() == "voice";
-    let kb_target = if state.assistant_active.get() && is_voice { 1.0 } else { 0.0 };
-    spring_anim(&state.kb_button_t, &state.kb_button_velocity, kb_target, SPRING_STIFFNESS, dt);
+    let kb_target = if state.assistant_active.get() && is_voice {
+        1.0
+    } else {
+        0.0
+    };
+    spring_anim(
+        &state.kb_button_t,
+        &state.kb_button_velocity,
+        kb_target,
+        SPRING_STIFFNESS,
+        dt,
+    );
 
     // Animate content dimensions toward target mode
     let mode = state.window_mode.get();
     let (tw, th) = mode.dimensions();
-    spring_px(&state.draw_width, &state.draw_w_velocity, tw as f64, SPRING_STIFFNESS, dt);
-    spring_px(&state.draw_height, &state.draw_h_velocity, th as f64, SPRING_STIFFNESS, dt);
+    spring_px(
+        &state.draw_width,
+        &state.draw_w_velocity,
+        tw as f64,
+        SPRING_STIFFNESS,
+        dt,
+    );
+    spring_px(
+        &state.draw_height,
+        &state.draw_h_velocity,
+        th as f64,
+        SPRING_STIFFNESS,
+        dt,
+    );
 
     // Shimmer phase
-    state.shimmer_phase.set((state.shimmer_phase.get() + SHIMMER_SPEED * frame_scale) % 1.0);
+    state
+        .shimmer_phase
+        .set((state.shimmer_phase.get() + SHIMMER_SPEED * frame_scale) % 1.0);
 
     // Fireworks
     tick_fireworks(state, dt);
@@ -568,14 +775,29 @@ fn tick(state: &PillState, dt: f64) {
         }
     }
     let flash_target = if state.flash_visible.get() { 1.0 } else { 0.0 };
-    spring_anim(&state.flash_t, &state.flash_velocity, flash_target, SPRING_STIFFNESS, dt);
+    spring_anim(
+        &state.flash_t,
+        &state.flash_velocity,
+        flash_target,
+        SPRING_STIFFNESS,
+        dt,
+    );
 
     // Cancel button
-    let cancel_target = if state.hovered.get()
-        && state.phase.get() != Phase::Idle
-        && !state.assistant_active.get()
-    { 1.0 } else { 0.0 };
-    spring_anim(&state.cancel_t, &state.cancel_velocity, cancel_target, SPRING_STIFFNESS * 2.0, dt);
+    let cancel_target =
+        if state.hovered.get() && state.phase.get() != Phase::Idle && !state.assistant_active.get()
+        {
+            1.0
+        } else {
+            0.0
+        };
+    spring_anim(
+        &state.cancel_t,
+        &state.cancel_velocity,
+        cancel_target,
+        SPRING_STIFFNESS * 2.0,
+        dt,
+    );
 
     // Auto-scroll to bottom
     if state.should_stick.get() && state.assistant_active.get() && !state.assistant_compact.get() {
@@ -752,7 +974,11 @@ fn tick_transcript(state: &PillState, dt: f64) {
         0.0
     };
 
-    let speed = if target > 0.5 { TRANSCRIPT_RISE_SPEED } else { TRANSCRIPT_FADE_SPEED };
+    let speed = if target > 0.5 {
+        TRANSCRIPT_RISE_SPEED
+    } else {
+        TRANSCRIPT_FADE_SPEED
+    };
     let opacity = state.transcript_opacity.get();
     let blend = 1.0 - (-speed * dt).exp();
     let next = opacity + (target - opacity) * blend;
@@ -768,7 +994,9 @@ fn tick_transcript(state: &PillState, dt: f64) {
 fn spring_anim(value: &Cell<f64>, velocity: &Cell<f64>, target: f64, stiffness: f64, dt: f64) {
     let v = value.get();
     let vel = velocity.get();
-    if v == target && vel == 0.0 { return; }
+    if v == target && vel == 0.0 {
+        return;
+    }
     let damping = 2.0 * stiffness.sqrt();
     let force = stiffness * (target - v) - damping * vel;
     let new_vel = vel + force * dt;
@@ -778,14 +1006,20 @@ fn spring_anim(value: &Cell<f64>, velocity: &Cell<f64>, target: f64, stiffness: 
         velocity.set(0.0);
     } else {
         value.set(new_v.clamp(0.0, 1.0));
-        velocity.set(if !(0.0..=1.0).contains(&new_v) { 0.0 } else { new_vel });
+        velocity.set(if !(0.0..=1.0).contains(&new_v) {
+            0.0
+        } else {
+            new_vel
+        });
     }
 }
 
 fn spring_px(value: &Cell<f64>, velocity: &Cell<f64>, target: f64, stiffness: f64, dt: f64) {
     let v = value.get();
     let vel = velocity.get();
-    if v == target && vel == 0.0 { return; }
+    if v == target && vel == 0.0 {
+        return;
+    }
     let damping = 2.0 * stiffness.sqrt();
     let force = stiffness * (target - v) - damping * vel;
     let new_vel = vel + force * dt;
@@ -801,7 +1035,7 @@ fn spring_px(value: &Cell<f64>, velocity: &Cell<f64>, target: f64, stiffness: f6
 
 // ── Window positioning ────────────────────────────────────────────
 
-fn reposition_window(window: id) {
+fn reposition_window(window: id, state: &PillState) {
     unsafe {
         let mouse_loc: NSPoint = msg_send![class!(NSEvent), mouseLocation];
         let screens: id = msg_send![class!(NSScreen), screens];
@@ -818,8 +1052,24 @@ fn reposition_window(window: id) {
             {
                 let visible: NSRect = msg_send![screen, visibleFrame];
                 let win_frame: NSRect = msg_send![window, frame];
-                let x = visible.origin.x + (visible.size.width - win_frame.size.width) / 2.0;
-                let y = visible.origin.y + MARGIN_BOTTOM as f64;
+                let theme = state.theme.borrow();
+                let content_width = state.draw_width.get() * state.ui_scale;
+                let center = match theme.position {
+                    rust_pill_style::Position::Left => {
+                        visible.origin.x + content_width / 2.0 + 16.0
+                    }
+                    rust_pill_style::Position::Right => {
+                        visible.origin.x + visible.size.width - content_width / 2.0 - 16.0
+                    }
+                    rust_pill_style::Position::Center => {
+                        visible.origin.x + visible.size.width / 2.0
+                    }
+                };
+                let x = center - win_frame.size.width / 2.0;
+                let y = visible.origin.y
+                    + (MARGIN_BOTTOM as f64 + theme.bottom_offset).min(
+                        (visible.size.height - state.draw_height.get() * state.ui_scale).max(0.0),
+                    );
 
                 let current_origin: NSPoint = {
                     let f: NSRect = msg_send![window, frame];
@@ -914,76 +1164,12 @@ unsafe fn setup(receiver: Receiver<InMessage>, embedded: bool) {
     let _: () = msg_send![view, addSubview:entry];
 
     // Initialize state
-    let state = Rc::new(PillState {
-        phase: Cell::new(Phase::Idle),
-        visibility: Cell::new(Visibility::WhileActive),
-        expand_t: Cell::new(0.0),
-        expand_velocity: Cell::new(0.0),
-        hovered: Cell::new(false),
-        wave_phase: Cell::new(0.0),
-        current_level: Cell::new(0.0),
-        target_level: Cell::new(0.0),
-        loading_offset: Cell::new(0.0),
-        pending_levels: RefCell::new(Vec::new()),
-        style_count: Cell::new(0),
-        style_name: RefCell::new(String::new()),
-        tooltip_t: Cell::new(0.0),
-        tooltip_velocity: Cell::new(0.0),
-        tooltip_width: Cell::new(0.0),
-        ui_scale,
-        window_mode: Cell::new(WindowMode::Dictation),
-        draw_width: Cell::new(DICTATION_WINDOW_WIDTH as f64),
-        draw_height: Cell::new(DICTATION_WINDOW_HEIGHT as f64),
-        draw_w_velocity: Cell::new(0.0),
-        draw_h_velocity: Cell::new(0.0),
-        assistant_active: Cell::new(false),
-        assistant_input_mode: RefCell::new("voice".to_string()),
-        assistant_compact: Cell::new(true),
-        assistant_conversation_id: RefCell::new(None),
-        assistant_user_prompt: RefCell::new(None),
-        assistant_messages: RefCell::new(Vec::new()),
-        assistant_streaming: RefCell::new(None),
-        assistant_permissions: RefCell::new(Vec::new()),
-        panel_open_t: Cell::new(0.0),
-        panel_open_velocity: Cell::new(0.0),
-        kb_button_t: Cell::new(0.0),
-        kb_button_velocity: Cell::new(0.0),
-        shimmer_phase: Cell::new(0.0),
-        scroll_offset: Cell::new(0.0),
-        content_height: Cell::new(0.0),
-        viewport_height: Cell::new(0.0),
-        should_stick: Cell::new(true),
-        click_regions: RefCell::new(Vec::new()),
-        entry_text: RefCell::new(String::new()),
-        cancel_t: Cell::new(0.0),
-        cancel_velocity: Cell::new(0.0),
-        flash_message: RefCell::new(String::new()),
-        flash_visible: Cell::new(false),
-        flash_t: Cell::new(0.0),
-        flash_velocity: Cell::new(0.0),
-        flash_timer: Cell::new(0.0),
-        flash_is_error: Cell::new(false),
-        flash_action: RefCell::new(None),
-        flash_action_label: RefCell::new(None),
-        fireworks_active: Cell::new(false),
-        fireworks_elapsed: Cell::new(0.0),
-        fireworks_next_launch: Cell::new(0),
-        fireworks_rockets: RefCell::new(Vec::new()),
-        flame_active: Cell::new(false),
-        flame_elapsed: Cell::new(0.0),
-        flame_tongues: RefCell::new(Vec::new()),
-        flash_blue_active: Cell::new(false),
-        flash_blue_elapsed: Cell::new(0.0),
-        transcript_text: RefCell::new(String::new()),
-        transcript_time_since_update: Cell::new(0.0),
-        transcript_opacity: Cell::new(0.0),
-        transcript_has_message: Cell::new(false),
-    });
+    let state = Rc::new(PillState::new(ui_scale));
 
     // Store in thread-local
     APP_CTX.with(|cell| {
         *cell.borrow_mut() = Some(AppContext {
-            state,
+            state: state.clone(),
             receiver: RefCell::new(receiver),
             window,
             view,
@@ -1010,8 +1196,9 @@ unsafe fn setup(receiver: Receiver<InMessage>, embedded: bool) {
     }
 
     // Position and show (orderFront only — don't steal focus from other apps)
-    reposition_window(window);
+    reposition_window(window, &state);
     let _: () = msg_send![window, orderFront:nil];
+    state.window_ordered_front.set(true);
 
     ipc::send(&OutMessage::Ready);
 }

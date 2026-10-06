@@ -57,11 +57,22 @@ pub struct PillPermission {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InMessage {
-    Phase { phase: Phase },
-    Levels { levels: Vec<f32> },
-    StyleInfo { count: u32, name: String },
-    Visibility { visibility: Visibility },
-    WindowSize { size: String },
+    Phase {
+        phase: Phase,
+    },
+    Levels {
+        levels: Vec<f32>,
+    },
+    StyleInfo {
+        count: u32,
+        name: String,
+    },
+    Visibility {
+        visibility: Visibility,
+    },
+    WindowSize {
+        size: String,
+    },
     Toast {
         message: String,
         toast_type: Option<String>,
@@ -70,10 +81,22 @@ pub enum InMessage {
         action_label: Option<String>,
     },
     DismissToast,
-    Fireworks { message: String },
-    Flame { message: String },
+    Fireworks {
+        message: String,
+    },
+    Flame {
+        message: String,
+    },
     FlashBlue,
-    BroadcastTranscript { text: String },
+    Completed,
+    Theme {
+        theme: rust_pill_style::ThemeInput,
+        #[serde(default)]
+        preview: bool,
+    },
+    BroadcastTranscript {
+        text: String,
+    },
     AssistantState {
         active: bool,
         input_mode: String,
@@ -91,21 +114,31 @@ pub enum InMessage {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutMessage {
     Ready,
-    Hover { hovered: bool },
+    Hover {
+        hovered: bool,
+    },
     Click,
-    StyleSwitch { direction: String },
+    StyleSwitch {
+        direction: String,
+    },
     AgentTalk,
     AssistantClose,
     EnableTypeMode,
-    TypedMessage { text: String },
-    OpenConversation { conversation_id: String },
+    TypedMessage {
+        text: String,
+    },
+    OpenConversation {
+        conversation_id: String,
+    },
     ResolvePermission {
         permission_id: String,
         status: String,
         always_allow: bool,
     },
     CancelDictation,
-    ToastAction { action: String },
+    ToastAction {
+        action: String,
+    },
 }
 
 pub fn send(msg: &OutMessage) {

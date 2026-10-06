@@ -26,9 +26,7 @@ pub async fn insert_dictation_event(
     Ok(event.clone())
 }
 
-pub async fn fetch_dictation_events(
-    pool: SqlitePool,
-) -> Result<Vec<DictationEvent>, sqlx::Error> {
+pub async fn fetch_dictation_events(pool: SqlitePool) -> Result<Vec<DictationEvent>, sqlx::Error> {
     let rows = sqlx::query(
         "SELECT id, timestamp, word_count, char_count, app_name, app_target_id, tone_id, correction_count, transcription_duration_ms, postprocess_duration_ms
          FROM dictation_events

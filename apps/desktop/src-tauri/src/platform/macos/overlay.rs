@@ -75,6 +75,19 @@ pub fn notify_style_info(app: &tauri::AppHandle, count: u32, name: &str) {
     }
 }
 
+pub fn notify_theme(app: &tauri::AppHandle, theme: &serde_json::Value) {
+    match serde_json::from_value(
+        serde_json::json!({"type": "theme", "theme": theme, "preview": theme.get("preview").and_then(|v| v.as_bool()).unwrap_or(false)}),
+    ) {
+        Ok(message) => {
+            if let Some(pill) = app.try_state::<std::sync::Arc<MacosPill>>() {
+                pill.send(message);
+            }
+        }
+        Err(error) => log::warn!("Invalid pill theme: {error}"),
+    }
+}
+
 pub fn notify_pill_window_size(app: &tauri::AppHandle, size: &PillWindowSize) {
     if let Some(pill) = app.try_state::<std::sync::Arc<MacosPill>>() {
         let size_str = match size {
@@ -156,4 +169,10 @@ fn start_out_reader(app: tauri::AppHandle, rx: mpsc::Receiver<OutMessage>) {
         }
         log::info!("Native macOS pill channel closed");
     });
+}
+
+pub fn notify_completion(app: &tauri::AppHandle) {
+    if let Some(pill) = app.try_state::<std::sync::Arc<MacosPill>>() {
+        pill.send(InMessage::Completed);
+    }
 }

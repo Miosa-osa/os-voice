@@ -34,8 +34,10 @@ pub(crate) fn is_over_pill_area(state: &PillState, x: f64, y: f64) -> bool {
         let tooltip_w = state.tooltip_width.get();
         let tooltip_x = (dw - tooltip_w) / 2.0;
         let tooltip_y = pill_area_top - TOOLTIP_GAP - TOOLTIP_HEIGHT;
-        if x >= tooltip_x && x <= tooltip_x + tooltip_w
-            && y >= tooltip_y && y <= tooltip_y + TOOLTIP_HEIGHT
+        if x >= tooltip_x
+            && x <= tooltip_x + tooltip_w
+            && y >= tooltip_y
+            && y <= tooltip_y + TOOLTIP_HEIGHT
         {
             return true;
         }
@@ -46,8 +48,10 @@ pub(crate) fn is_over_pill_area(state: &PillState, x: f64, y: f64) -> bool {
         let btn_x = pill_x + pill_w - CANCEL_BUTTON_SIZE / 2.0 + 2.0;
         let pill_y = pill_area_top + (PILL_AREA_HEIGHT - EXPANDED_PILL_HEIGHT) / 2.0;
         let btn_y = pill_y - CANCEL_BUTTON_SIZE / 2.0 - 2.0;
-        if x >= btn_x && x <= btn_x + CANCEL_BUTTON_SIZE
-            && y >= btn_y && y <= btn_y + CANCEL_BUTTON_SIZE
+        if x >= btn_x
+            && x <= btn_x + CANCEL_BUTTON_SIZE
+            && y >= btn_y
+            && y <= btn_y + CANCEL_BUTTON_SIZE
         {
             return true;
         }
@@ -73,17 +77,23 @@ pub(crate) fn handle_click(state: &PillState, x: f64, y: f64) {
                     }
                 }
                 ClickAction::StyleForward => {
-                    ipc::send(&OutMessage::StyleSwitch { direction: "forward".to_string() });
+                    ipc::send(&OutMessage::StyleSwitch {
+                        direction: "forward".to_string(),
+                    });
                 }
                 ClickAction::StyleBackward => {
-                    ipc::send(&OutMessage::StyleSwitch { direction: "backward".to_string() });
+                    ipc::send(&OutMessage::StyleSwitch {
+                        direction: "backward".to_string(),
+                    });
                 }
                 ClickAction::AssistantClose => {
                     ipc::send(&OutMessage::AssistantClose);
                 }
                 ClickAction::OpenInNew => {
                     if let Some(ref id) = *state.assistant_conversation_id.borrow() {
-                        ipc::send(&OutMessage::OpenConversation { conversation_id: id.clone() });
+                        ipc::send(&OutMessage::OpenConversation {
+                            conversation_id: id.clone(),
+                        });
                     }
                     ipc::send(&OutMessage::AssistantClose);
                 }
@@ -95,17 +105,23 @@ pub(crate) fn handle_click(state: &PillState, x: f64, y: f64) {
                 }
                 ClickAction::PermissionAllow(id) => {
                     ipc::send(&OutMessage::ResolvePermission {
-                        permission_id: id.clone(), status: "allowed".to_string(), always_allow: false,
+                        permission_id: id.clone(),
+                        status: "allowed".to_string(),
+                        always_allow: false,
                     });
                 }
                 ClickAction::PermissionDeny(id) => {
                     ipc::send(&OutMessage::ResolvePermission {
-                        permission_id: id.clone(), status: "denied".to_string(), always_allow: false,
+                        permission_id: id.clone(),
+                        status: "denied".to_string(),
+                        always_allow: false,
                     });
                 }
                 ClickAction::PermissionAlwaysAllow(id) => {
                     ipc::send(&OutMessage::ResolvePermission {
-                        permission_id: id.clone(), status: "allowed".to_string(), always_allow: true,
+                        permission_id: id.clone(),
+                        status: "allowed".to_string(),
+                        always_allow: true,
                     });
                 }
                 ClickAction::SendButton => {
@@ -117,7 +133,9 @@ pub(crate) fn handle_click(state: &PillState, x: f64, y: f64) {
                 }
                 ClickAction::FlashAction => {
                     if let Some(ref action) = *state.flash_action.borrow() {
-                        ipc::send(&OutMessage::ToastAction { action: action.clone() });
+                        ipc::send(&OutMessage::ToastAction {
+                            action: action.clone(),
+                        });
                     }
                     state.flash_visible.set(false);
                     state.flash_timer.set(0.0);
@@ -158,10 +176,8 @@ pub(crate) fn set_expanded_input_region(gdk_window: &gdk::Window, state: &PillSt
     let (ox, oy) = state.content_offset();
 
     if state.assistant_active.get() {
-        let rect = cairo::RectangleInt::new(
-            ox as i32, oy as i32,
-            dw.ceil() as i32, dh.ceil() as i32,
-        );
+        let rect =
+            cairo::RectangleInt::new(ox as i32, oy as i32, dw.ceil() as i32, dh.ceil() as i32);
         let region = cairo::Region::create_rectangle(&rect);
         gdk_window.input_shape_combine_region(&region, 0, 0);
     } else {
@@ -178,17 +194,21 @@ pub(crate) fn set_expanded_input_region(gdk_window: &gdk::Window, state: &PillSt
             let tooltip_top = (oy + pill_area_top - TOOLTIP_GAP - TOOLTIP_HEIGHT) as i32;
             let region_w = tooltip_w.ceil().max(pill_w).ceil() as i32;
             let region_rx = (ox + (dw - region_w as f64) / 2.0) as i32;
-            let region_h = pill_ry + pill_h.ceil() as i32 + ((PILL_AREA_HEIGHT - EXPANDED_PILL_HEIGHT) / 2.0).ceil() as i32 - tooltip_top;
+            let region_h = pill_ry
+                + pill_h.ceil() as i32
+                + ((PILL_AREA_HEIGHT - EXPANDED_PILL_HEIGHT) / 2.0).ceil() as i32
+                - tooltip_top;
             let rect = cairo::RectangleInt::new(region_rx, tooltip_top, region_w, region_h);
             let region = cairo::Region::create_rectangle(&rect);
             if state.phase.get() != Phase::Idle {
                 union_cancel_button(&region, ox, oy, dw, dh);
             }
-            union_flash_action(&region, state, ox, oy, dw, dh);
+            union_flash_action(&region, state, ox, oy);
             gdk_window.input_shape_combine_region(&region, 0, 0);
         } else {
             let rect = cairo::RectangleInt::new(
-                pill_rx, pill_ry,
+                pill_rx,
+                pill_ry,
                 pill_w.ceil() as i32,
                 PILL_AREA_HEIGHT.ceil() as i32,
             );
@@ -196,17 +216,13 @@ pub(crate) fn set_expanded_input_region(gdk_window: &gdk::Window, state: &PillSt
             if state.phase.get() != Phase::Idle {
                 union_cancel_button(&region, ox, oy, dw, dh);
             }
-            union_flash_action(&region, state, ox, oy, dw, dh);
+            union_flash_action(&region, state, ox, oy);
             gdk_window.input_shape_combine_region(&region, 0, 0);
         }
     }
 }
 
-fn union_flash_action(
-    region: &cairo::Region,
-    state: &PillState,
-    ox: f64, oy: f64, dw: f64, dh: f64,
-) {
+fn union_flash_action(region: &cairo::Region, state: &PillState, ox: f64, oy: f64) {
     if state.flash_action.borrow().is_none() || state.flash_t.get() < 0.5 {
         return;
     }
@@ -225,10 +241,7 @@ fn union_flash_action(
     }
 }
 
-fn union_cancel_button(
-    region: &cairo::Region,
-    ox: f64, oy: f64, dw: f64, dh: f64,
-) {
+fn union_cancel_button(region: &cairo::Region, ox: f64, oy: f64, dw: f64, dh: f64) {
     let pill_area_top = dh - PILL_AREA_HEIGHT;
     let pill_y = pill_area_top + (PILL_AREA_HEIGHT - EXPANDED_PILL_HEIGHT) / 2.0;
     let pill_x = (dw - EXPANDED_PILL_WIDTH) / 2.0;
@@ -259,13 +272,10 @@ pub(crate) fn update_input_region(gdk_window: &gdk::Window, state: &PillState) {
         let (pill_x, pill_y, pill_w, pill_h) = pill_position(state, dw, dh);
         let pill_rx = (ox + pill_x) as i32;
         let pill_ry = (oy + pill_y) as i32;
-        let rect = cairo::RectangleInt::new(
-            pill_rx, pill_ry,
-            pill_w.ceil() as i32,
-            pill_h.ceil() as i32,
-        );
+        let rect =
+            cairo::RectangleInt::new(pill_rx, pill_ry, pill_w.ceil() as i32, pill_h.ceil() as i32);
         let region = cairo::Region::create_rectangle(&rect);
-        union_flash_action(&region, state, ox, oy, dw, dh);
+        union_flash_action(&region, state, ox, oy);
         gdk_window.input_shape_combine_region(&region, 0, 0);
     }
 }

@@ -5,25 +5,18 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FormattedMessage } from "react-intl";
 import { produceAppState, useAppStore } from "../../store";
-import { buildWaveFile, ensureFloat32Array } from "../../utils/audio.utils";
+import { buildWaveFile, stopRecording } from "../../utils/audio.utils";
 import { AudioWaveform } from "../common/AudioWaveform";
 
-type StopRecordingResponse = {
-  samples: number[] | Float32Array;
-  sampleRate?: number;
-};
-
 const createPreviewUrl = (
-  rawSamples: number[] | Float32Array,
+  samples: Float32Array,
   sampleRate: number,
 ): string | null => {
   if (!sampleRate || !Number.isFinite(sampleRate) || sampleRate <= 0) {
     return null;
   }
 
-  const samples = ensureFloat32Array(rawSamples ?? []);
-
-  if (!samples || samples.length === 0) {
+  if (samples.length === 0) {
     return null;
   }
 
@@ -172,15 +165,12 @@ export const MicrophoneTester = ({
       setTestState("stopping");
 
       try {
-        const response = await invoke<StopRecordingResponse>("stop_recording");
-        const rate = response.sampleRate ?? 0;
-        const samplesArray =
-          response.samples instanceof Float32Array
-            ? Array.from(response.samples)
-            : response.samples;
+        const response = await stopRecording();
+        const rate = response.sampleRate;
+        const samplesArray = response.samples;
 
         if (!opts?.silent) {
-          const url = createPreviewUrl(samplesArray ?? [], rate);
+          const url = createPreviewUrl(samplesArray, rate);
           if (url) {
             updatePreviewUrl(url);
           } else {

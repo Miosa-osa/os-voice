@@ -35,6 +35,10 @@ pub fn notify_style_info(app: &tauri::AppHandle, count: u32, name: &str) {
     pill_process::notify_style_info(app, count, name);
 }
 
+pub fn notify_theme(app: &tauri::AppHandle, theme: &serde_json::Value) {
+    pill_process::notify_theme(app, theme);
+}
+
 pub fn notify_pill_window_size(app: &tauri::AppHandle, size: &PillWindowSize) {
     pill_process::notify_pill_window_size(app, size);
 }
@@ -46,4 +50,8 @@ pub fn notify_assistant_state(app: &tauri::AppHandle, payload: &str) {
 fn resolve_pill_binary_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
     pill_process::resolve_pill_binary_in_resources(app, BINARY_NAME)
         .or_else(|| pill_process::resolve_pill_binary_in_dev(PACKAGE_DIR, BINARY_NAME))
+}
+
+pub fn notify_completion(app: &tauri::AppHandle) {
+    crate::pill_process::notify_completion(app);
 }

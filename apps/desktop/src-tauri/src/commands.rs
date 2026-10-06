@@ -501,58 +501,6 @@ pub struct DeviceCapability {
     pub gpu_name: Option<String>,
     pub cpu_cores: u32,
     pub ram_gb: f32,
-    /// Total GPU VRAM in MB. On NVIDIA this is best-effort via nvidia-smi; on
-    /// Apple Silicon (unified memory) it mirrors total system RAM. None when
-    /// unavailable (no NVIDIA GPU, tool missing, or driver issue).
-    pub vram_total_mb: Option<u64>,
-    /// True when the GPU shares system RAM (Apple Silicon unified memory). In
-    /// that case there is no separate VRAM and RAM/VRAM figures are identical.
-    pub unified_memory: bool,
-}
-
-/// Returns the GPU name reported by the platform when a usable
-/// integrated/discrete adapter is an Apple GPU (name contains "apple",
-/// case-insensitive). Detection is purely by name so the exact same code
-/// compiles and is verifiable on non-Apple hosts. None otherwise.
-fn detect_apple_gpu_name() -> Option<String> {
-    crate::system::gpu::list_available_gpus()
-        .into_iter()
-        .find(|g| {
-            matches!(g.device_type.as_str(), "DiscreteGpu" | "IntegratedGpu")
-                && g.name.to_lowercase().contains("apple")
-        })
-        .map(|g| g.name)
-}
-
-/// Best-effort NVIDIA GPU snapshot via `nvidia-smi`. Returns
-/// (name, utilization %, VRAM used MB, VRAM total MB). Any failure — no NVIDIA
-/// GPU, tool missing, driver/library mismatch — yields None and never errors.
-fn query_nvidia_gpu() -> Option<(Option<String>, Option<f32>, Option<u64>, Option<u64>)> {
-    let out = std::process::Command::new("nvidia-smi")
-        .args([
-            "--query-gpu=utilization.gpu,memory.used,memory.total,name",
-            "--format=csv,noheader,nounits",
-        ])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let text = String::from_utf8_lossy(&out.stdout);
-    let line = text.lines().next()?;
-    let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
-    if parts.len() < 4 {
-        return None;
-    }
-    let util = parts[0].parse::<f32>().ok();
-    let used = parts[1].parse::<u64>().ok();
-    let total = parts[2].parse::<u64>().ok();
-    let name = if parts[3].is_empty() {
-        None
-    } else {
-        Some(parts[3].to_string())
-    };
-    Some((name, util, used, total))
 }
 
 #[tauri::command]
@@ -585,87 +533,11 @@ pub fn get_device_capability() -> DeviceCapability {
     sys.refresh_memory();
     let ram_gb = sys.total_memory() as f32 / 1_073_741_824.0;
 
-    // Apple Silicon has unified memory: the GPU shares system RAM, there is no
-    // separate VRAM, and nvidia-smi does not exist. Detect it by GPU name so the
-    // same code path is exercised on any platform.
-    let is_apple = usable
-        .as_ref()
-        .map(|g| g.name.to_lowercase().contains("apple"))
-        .unwrap_or(false);
-
-    let (vram_total_mb, unified_memory) = if is_apple {
-        (Some((ram_gb * 1024.0) as u64), true)
-    } else {
-        (query_nvidia_gpu().and_then(|(_, _, _, total)| total), false)
-    };
-
     DeviceCapability {
         has_usable_gpu: usable.is_some(),
         gpu_name: usable.map(|g| g.name),
         cpu_cores,
         ram_gb,
-        vram_total_mb,
-        unified_memory,
-    }
-}
-
-/// A live snapshot of system resource usage, for the Speed & System diagnostics.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct LiveSystemStats {
-    pub cpu_load_pct: f32,
-    pub ram_used_mb: u64,
-    pub ram_total_mb: u64,
-    pub gpu_name: Option<String>,
-    pub gpu_util_pct: Option<f32>,
-    pub vram_used_mb: Option<u64>,
-    pub vram_total_mb: Option<u64>,
-    /// True when the GPU shares system RAM (Apple Silicon unified memory). The
-    /// vram_used/total figures then mirror RAM used/total.
-    pub unified_memory: bool,
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn get_live_system_stats() -> LiveSystemStats {
-    let mut sys = sysinfo::System::new();
-    // CPU usage needs two samples over a short interval to compute a delta.
-    sys.refresh_cpu_usage();
-    std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
-    sys.refresh_cpu_usage();
-    sys.refresh_memory();
-
-    let cpu_load_pct = sys.global_cpu_usage();
-    let ram_used_mb = sys.used_memory() / 1_048_576;
-    let ram_total_mb = sys.total_memory() / 1_048_576;
-
-    // Apple Silicon path: unified memory means "VRAM" is just system RAM, and
-    // there is no unprivileged GPU-utilization source, so gpu_util_pct is None.
-    if let Some(apple_name) = detect_apple_gpu_name() {
-        return LiveSystemStats {
-            cpu_load_pct,
-            ram_used_mb,
-            ram_total_mb,
-            gpu_name: Some(apple_name),
-            gpu_util_pct: None,
-            vram_used_mb: Some(ram_used_mb),
-            vram_total_mb: Some(ram_total_mb),
-            unified_memory: true,
-        };
-    }
-
-    let (gpu_name, gpu_util_pct, vram_used_mb, vram_total_mb) =
-        query_nvidia_gpu().unwrap_or((None, None, None, None));
-
-    LiveSystemStats {
-        cpu_load_pct,
-        ram_used_mb,
-        ram_total_mb,
-        gpu_name,
-        gpu_util_pct,
-        vram_used_mb,
-        vram_total_mb,
-        unified_memory: false,
     }
 }
 
@@ -1777,6 +1649,64 @@ pub fn copy_to_clipboard(text: String) -> Result<(), String> {
         .map_err(|e| format!("failed to set clipboard: {e}"))
 }
 
+/// Decide whether a posted paste keystroke actually landed, by comparing the
+/// focused field's text before and after.
+///
+/// Posting a synthetic Cmd+V always "succeeds" — the event goes to the window
+/// server regardless of whether the target does anything with it. This is the
+/// observation step that turns that into a real answer.
+///
+/// Only an observed no-op counts as failure. When the field's text is unreadable
+/// the target simply doesn't expose it to accessibility (terminals such as
+/// WezTerm render their own buffer, as do canvas and GPU-drawn editors), so
+/// absence of evidence is not evidence of failure — the transcript is left on the
+/// clipboard as a safety net for exactly those targets.
+fn paste_landed(before: Option<&str>, after: Option<&str>) -> bool {
+    match (before, after) {
+        // Both readable: an unchanged value is direct proof the paste did nothing.
+        (Some(before), Some(after)) => before != after,
+        // Anything unreadable: unobservable, so don't invent a failure.
+        _ => true,
+    }
+}
+
+#[cfg(test)]
+mod paste_landed_tests {
+    use super::paste_landed;
+
+    #[test]
+    fn reports_landed_when_field_text_changed() {
+        assert!(paste_landed(Some("hello"), Some("hello world")));
+    }
+
+    #[test]
+    fn reports_not_landed_when_field_text_unchanged() {
+        // The regression: a target that ignores synthetic Cmd+V leaves the field
+        // untouched, so we must not claim the transcript was pasted.
+        assert!(!paste_landed(Some("hello"), Some("hello")));
+    }
+
+    #[test]
+    fn empty_field_that_gained_text_counts_as_landed() {
+        assert!(paste_landed(Some(""), Some("dictated text")));
+    }
+
+    #[test]
+    fn unverifiable_target_is_treated_as_pasted() {
+        // Terminals and canvas editors expose no AX text either side of the paste.
+        // Absence of evidence must not be reported as failure — that was what
+        // surfaced "copied to clipboard" for a paste into WezTerm that had in fact
+        // landed.
+        assert!(paste_landed(None, None));
+    }
+
+    #[test]
+    fn readability_change_counts_as_landed() {
+        assert!(paste_landed(None, Some("now readable")));
+        assert!(paste_landed(Some("was readable"), None));
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn paste(
@@ -1784,11 +1714,15 @@ pub async fn paste(
     keybind: Option<String>,
     skip_clipboard_restore: Option<bool>,
 ) -> Result<PasteOutcome, String> {
-    // Probe the focused target first. If it clearly can't accept text, write
-    // the transcript to the clipboard and skip the paste keystroke entirely —
-    // that avoids the race where paste's delayed clipboard-restore overwrites
-    // the transcript we just put there. A short timeout keeps paste latency
-    // bounded if the accessibility probe stalls.
+    // Probe the focused target for confidence only — never as a veto. The probe
+    // is a heuristic (it recognises four AX roles, walks a bounded number of
+    // parents looking for a web area, and trusts AXSelectedText/AXValue
+    // settability), so it reports NotEditable for plenty of fields that paste
+    // perfectly well: Electron views, terminals, and native widgets that simply
+    // don't advertise settability. Refusing to paste on that guess is what made
+    // dictation silently degrade to "copied to clipboard". Always attempt the
+    // keystroke and report what actually happened instead. A short timeout keeps
+    // paste latency bounded if the accessibility probe stalls.
     let target = tokio::time::timeout(
         std::time::Duration::from_millis(500),
         tauri::async_runtime::spawn_blocking(
@@ -1800,31 +1734,19 @@ pub async fn paste(
     .and_then(|r| r.ok())
     .unwrap_or(PasteTargetState::Unknown);
 
-    if matches!(target, PasteTargetState::NotEditable) {
-        let copy_result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-            let mut clipboard =
-                arboard::Clipboard::new().map_err(|e| format!("clipboard unavailable: {e}"))?;
-            clipboard
-                .set_text(text)
-                .map_err(|e| format!("failed to set clipboard: {e}"))
-        })
-        .await;
+    // Only a confidently-editable target gets its clipboard restored afterwards.
+    // Otherwise the transcript stays on the clipboard as a safety net, which also
+    // removes the timer race where the delayed restore could overwrite it before
+    // the target consumed the pasteboard.
+    let confident_target = matches!(target, PasteTargetState::Editable);
+    let skip_clipboard_restore = skip_clipboard_restore.unwrap_or(!confident_target);
 
-        return match copy_result {
-            Ok(Ok(())) => Ok(PasteOutcome::CopiedToClipboard),
-            Ok(Err(err)) => {
-                log::error!("Copy-to-clipboard fallback failed: {err}");
-                Err(err)
-            }
-            Err(err) => {
-                let message = format!("Paste task join error: {err}");
-                log::error!("{message}");
-                Err(message)
-            }
-        };
-    }
-
-    let skip_clipboard_restore = skip_clipboard_restore.unwrap_or(false);
+    // Snapshot the focused field so we can tell whether the keystroke landed.
+    let text_before =
+        tauri::async_runtime::spawn_blocking(crate::platform::accessibility::get_text_field_info)
+            .await
+            .ok()
+            .and_then(|info| info.text_content);
     let join_result = tauri::async_runtime::spawn_blocking(move || {
         platform_paste_text(&text, keybind.as_deref(), skip_clipboard_restore)
     })
@@ -1834,9 +1756,69 @@ pub async fn paste(
         Ok(result) => {
             if let Err(err) = result.as_ref() {
                 log::error!("Paste failed: {err}");
+                return result.map(|()| PasteOutcome::Pasted);
             }
 
-            result.map(|()| PasteOutcome::Pasted)
+            // The keystroke was posted, but posting is not landing: a target that
+            // ignores synthetic Cmd+V leaves the field untouched. Re-read the
+            // focused field and only claim Pasted when its text actually changed.
+            // When we can't observe a change the transcript is still on the
+            // clipboard (skip_clipboard_restore above guarantees it for
+            // non-confident targets), so CopiedToClipboard is the honest answer.
+            // Posting a keystroke is asynchronous: the window server delivers it,
+            // then the target's event loop has to process it before its AX value
+            // reflects the paste. A single immediate read races that and reports a
+            // false no-op, so poll until the field changes. Returns as soon as a
+            // change is observed, so a healthy paste costs one interval, not the
+            // whole budget.
+            let baseline = text_before.clone();
+            let text_after = tauri::async_runtime::spawn_blocking(move || {
+                const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(60);
+                const MAX_WAIT: std::time::Duration = std::time::Duration::from_millis(900);
+
+                // If the field was unreadable before the paste it will stay
+                // unreadable after, so polling can only burn latency on exactly the
+                // targets that can never be verified (terminals, canvas editors).
+                // Read once and let paste_landed decide.
+                if baseline.is_none() {
+                    return crate::platform::accessibility::get_text_field_info().text_content;
+                }
+
+                let deadline = std::time::Instant::now() + MAX_WAIT;
+                loop {
+                    let current =
+                        crate::platform::accessibility::get_text_field_info().text_content;
+                    if current.as_deref() != baseline.as_deref() {
+                        return current;
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        return current;
+                    }
+                    std::thread::sleep(POLL_INTERVAL);
+                }
+            })
+            .await
+            .ok()
+            .flatten();
+
+            let landed = paste_landed(
+                text_before.as_deref(),
+                text_after.as_deref(),
+                confident_target,
+            );
+
+            if !landed {
+                log::warn!(
+                    "Paste keystroke posted but focused field did not change (target={target:?}); \
+                     transcript left on clipboard"
+                );
+            }
+
+            Ok(if landed {
+                PasteOutcome::Pasted
+            } else {
+                PasteOutcome::CopiedToClipboard
+            })
         }
         Err(err) => {
             let message = format!("Paste task join error: {err}");

@@ -1,3 +1,4 @@
+import { getLocalTranscriptionSidecarManager } from "../sidecars";
 import { invoke } from "@tauri-apps/api/core";
 import { getAppState, produceAppState } from "../store";
 import {
@@ -77,9 +78,7 @@ const isGpuError = (error: unknown): boolean => {
   );
 };
 
-// Runtime safety net: if a local GPU transcription fails *with a GPU-specific
-// error*, switch to CPU with a size-appropriate model so the user is never stuck
-// on an unusable GPU config.
+// Use the same temporary cooldown as the sidecar facade.
 export const fallbackToCpuIfGpuFailed = async (
   error: unknown,
 ): Promise<boolean> => {
@@ -92,18 +91,12 @@ export const fallbackToCpuIfGpuFailed = async (
     return false;
   }
 
-  try {
-    const cap = await getDeviceCapability();
-    const modelSize = cap.cpuCores >= 8 && cap.ramGb >= 8 ? "small" : "base";
-    await updateUserPreferences((preferences) => {
-      preferences.transcriptionDevice = "cpu";
-      preferences.transcriptionModelSize = modelSize;
-    });
-    getLogger().warning("GPU transcription failed — switched to CPU");
-    showSnackbar("GPU unavailable — switched to CPU for transcription.");
-    return true;
-  } catch (error) {
-    getLogger().error(`CPU fallback failed: ${error}`);
-    return false;
-  }
+  getLocalTranscriptionSidecarManager().markGpuUnavailable(error);
+  getLogger().warning(
+    "GPU transcription failed; temporarily using CPU without changing preferences",
+  );
+  showSnackbar(
+    "GPU temporarily unavailable. OS Voice will retry it automatically.",
+  );
+  return true;
 };

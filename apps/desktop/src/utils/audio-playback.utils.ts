@@ -73,7 +73,7 @@ export const stopActivePlayback = (reason: PlaybackStopReason): void => {
 
 export const playWebAudio = async (
   transcriptionId: string,
-  data: { samples: number[]; sampleRate: number },
+  data: { samples: Float32Array; sampleRate: number },
   onProgress: (progress: number) => void,
   onStop: (reason: PlaybackStopReason) => void,
 ): Promise<void> => {
@@ -85,7 +85,7 @@ export const playWebAudio = async (
   }
 
   const channelCount = 1;
-  const floatSamples = Float32Array.from(data.samples ?? []);
+  const floatSamples = data.samples;
   const buffer = context.createBuffer(
     channelCount,
     floatSamples.length,

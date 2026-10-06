@@ -9,6 +9,12 @@ pub(crate) const MARGIN_BOTTOM: i32 = 8;
 
 pub(crate) const PILL_AREA_HEIGHT: f64 = 48.0;
 
+// ── Theme ─────────────────────────────────────────────────────────
+pub(crate) const MIN_THEME_SCALE: f64 = 0.75;
+pub(crate) const MAX_THEME_SCALE: f64 = 1.5;
+pub(crate) const SPARKLE_DURATION: f64 = 0.9;
+pub(crate) const SPARKLE_COUNT: usize = 14;
+
 pub(crate) const MIN_PILL_WIDTH: f64 = 48.0;
 pub(crate) const MIN_PILL_HEIGHT: f64 = 6.0;
 pub(crate) const EXPANDED_PILL_WIDTH: f64 = 120.0;
@@ -33,23 +39,7 @@ pub(crate) const LEVEL_SMOOTHING: f64 = 0.18;
 pub(crate) const TARGET_DECAY_PER_FRAME: f64 = 0.985;
 pub(crate) const WAVE_BASE_PHASE_STEP: f64 = 0.11;
 pub(crate) const WAVE_PHASE_GAIN: f64 = 0.32;
-pub(crate) const MIN_AMPLITUDE: f64 = 0.03;
-pub(crate) const MAX_AMPLITUDE: f64 = 1.3;
-pub(crate) const STROKE_WIDTH: f64 = 1.6;
 pub(crate) const PROCESSING_BASE_LEVEL: f64 = 0.16;
-
-pub(crate) struct WaveConfig {
-    pub(crate) frequency: f64,
-    pub(crate) multiplier: f64,
-    pub(crate) phase_offset: f64,
-    pub(crate) opacity: f64,
-}
-
-pub(crate) const WAVE_CONFIGS: &[WaveConfig] = &[
-    WaveConfig { frequency: 0.8, multiplier: 1.6, phase_offset: 0.0, opacity: 1.0 },
-    WaveConfig { frequency: 1.0, multiplier: 1.35, phase_offset: 0.85, opacity: 0.78 },
-    WaveConfig { frequency: 1.25, multiplier: 1.05, phase_offset: 1.7, opacity: 0.56 },
-];
 
 // ── Loading — MUI LinearProgress indeterminate ────────────────────
 pub(crate) const LOADING_BAR_WIDTH_FRAC: f64 = 0.4;
@@ -103,11 +93,11 @@ pub(crate) const PERM_BUTTON_GAP: f64 = 6.0;
 // ── Window sizes for each mode ────────────────────────────────────
 // Height = PANEL_TOP_MARGIN + panel_height + PANEL_BOTTOM_MARGIN
 pub(crate) const WINDOW_W_COMPACT: i32 = 452;
-pub(crate) const WINDOW_H_COMPACT: i32 = 144;   // 14 + 120 + 10
+pub(crate) const WINDOW_H_COMPACT: i32 = 144; // 14 + 120 + 10
 pub(crate) const WINDOW_W_EXPANDED: i32 = 600;
-pub(crate) const WINDOW_H_EXPANDED: i32 = 282;  // 14 + 258 + 10
+pub(crate) const WINDOW_H_EXPANDED: i32 = 282; // 14 + 258 + 10
 pub(crate) const WINDOW_W_TYPING: i32 = 600;
-pub(crate) const WINDOW_H_TYPING: i32 = 362;    // 14 + 338 + 10
+pub(crate) const WINDOW_H_TYPING: i32 = 362; // 14 + 338 + 10
 
 // ── Flash message / toast ────────────────────────────────────────
 pub(crate) const FLASH_DURATION: f64 = 2.5;
@@ -142,29 +132,89 @@ pub(crate) struct FireworkLaunch {
 }
 
 pub(crate) const FIREWORK_COLORS: &[(f64, f64, f64)] = &[
-    (1.0, 0.4, 0.3),   // coral red
-    (0.3, 0.8, 1.0),   // sky blue
-    (1.0, 0.85, 0.2),  // gold
-    (0.4, 1.0, 0.5),   // green
-    (1.0, 0.5, 0.9),   // pink
-    (0.5, 0.6, 1.0),   // lavender
-    (1.0, 0.65, 0.2),  // orange
-    (0.3, 1.0, 0.9),   // cyan
-    (1.0, 0.35, 0.5),  // hot pink
-    (0.7, 0.5, 1.0),   // purple
+    (1.0, 0.4, 0.3),  // coral red
+    (0.3, 0.8, 1.0),  // sky blue
+    (1.0, 0.85, 0.2), // gold
+    (0.4, 1.0, 0.5),  // green
+    (1.0, 0.5, 0.9),  // pink
+    (0.5, 0.6, 1.0),  // lavender
+    (1.0, 0.65, 0.2), // orange
+    (0.3, 1.0, 0.9),  // cyan
+    (1.0, 0.35, 0.5), // hot pink
+    (0.7, 0.5, 1.0),  // purple
 ];
 
 pub(crate) const FIREWORK_LAUNCHES: &[FireworkLaunch] = &[
-    FireworkLaunch { time: 0.2, angle_deg: -25.0, speed: 140.0, fuse: 0.50, num_sparks: 12 },
-    FireworkLaunch { time: 0.8, angle_deg:  30.0, speed: 125.0, fuse: 0.55, num_sparks: 10 },
-    FireworkLaunch { time: 1.5, angle_deg: -15.0, speed: 150.0, fuse: 0.45, num_sparks: 14 },
-    FireworkLaunch { time: 2.2, angle_deg:  40.0, speed: 115.0, fuse: 0.60, num_sparks: 12 },
-    FireworkLaunch { time: 3.0, angle_deg: -35.0, speed: 130.0, fuse: 0.50, num_sparks: 11 },
-    FireworkLaunch { time: 3.7, angle_deg:  20.0, speed: 145.0, fuse: 0.50, num_sparks: 13 },
-    FireworkLaunch { time: 4.5, angle_deg: -40.0, speed: 120.0, fuse: 0.55, num_sparks: 10 },
-    FireworkLaunch { time: 5.2, angle_deg:  15.0, speed: 150.0, fuse: 0.45, num_sparks: 14 },
-    FireworkLaunch { time: 5.9, angle_deg: -30.0, speed: 125.0, fuse: 0.50, num_sparks: 12 },
-    FireworkLaunch { time: 6.4, angle_deg:  35.0, speed: 140.0, fuse: 0.55, num_sparks: 11 },
+    FireworkLaunch {
+        time: 0.2,
+        angle_deg: -25.0,
+        speed: 140.0,
+        fuse: 0.50,
+        num_sparks: 12,
+    },
+    FireworkLaunch {
+        time: 0.8,
+        angle_deg: 30.0,
+        speed: 125.0,
+        fuse: 0.55,
+        num_sparks: 10,
+    },
+    FireworkLaunch {
+        time: 1.5,
+        angle_deg: -15.0,
+        speed: 150.0,
+        fuse: 0.45,
+        num_sparks: 14,
+    },
+    FireworkLaunch {
+        time: 2.2,
+        angle_deg: 40.0,
+        speed: 115.0,
+        fuse: 0.60,
+        num_sparks: 12,
+    },
+    FireworkLaunch {
+        time: 3.0,
+        angle_deg: -35.0,
+        speed: 130.0,
+        fuse: 0.50,
+        num_sparks: 11,
+    },
+    FireworkLaunch {
+        time: 3.7,
+        angle_deg: 20.0,
+        speed: 145.0,
+        fuse: 0.50,
+        num_sparks: 13,
+    },
+    FireworkLaunch {
+        time: 4.5,
+        angle_deg: -40.0,
+        speed: 120.0,
+        fuse: 0.55,
+        num_sparks: 10,
+    },
+    FireworkLaunch {
+        time: 5.2,
+        angle_deg: 15.0,
+        speed: 150.0,
+        fuse: 0.45,
+        num_sparks: 14,
+    },
+    FireworkLaunch {
+        time: 5.9,
+        angle_deg: -30.0,
+        speed: 125.0,
+        fuse: 0.50,
+        num_sparks: 12,
+    },
+    FireworkLaunch {
+        time: 6.4,
+        angle_deg: 35.0,
+        speed: 140.0,
+        fuse: 0.55,
+        num_sparks: 11,
+    },
 ];
 
 // ── Flame ───────────────────────────────────────────────────────

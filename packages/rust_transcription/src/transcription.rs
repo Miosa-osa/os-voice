@@ -8,6 +8,7 @@ use crate::compute::ComputeMode;
 use serde::Serialize;
 use whisper_rs::{
     FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperError,
+    WhisperState,
 };
 
 #[derive(Debug, Clone)]
@@ -45,6 +46,7 @@ struct ResolvedDevice {
 pub struct TranscriptionEngine {
     mode: ComputeMode,
     context_cache: Arc<Mutex<HashMap<String, Arc<WhisperContext>>>>,
+    state_cache: Arc<Mutex<HashMap<String, Arc<Mutex<WhisperState>>>>>,
 }
 
 impl TranscriptionEngine {
@@ -52,6 +54,7 @@ impl TranscriptionEngine {
         Self {
             mode,
             context_cache: Arc::new(Mutex::new(HashMap::new())),
+            state_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -108,9 +111,11 @@ impl TranscriptionEngine {
 
         let device = self.resolve_device_blocking(input.device_id.as_deref())?;
         let context = self.context_for_model(&input.model_path, &device)?;
-        let mut state = context
-            .create_state()
-            .map_err(|err| format!("failed to create whisper state: {err}"))?;
+        let cache_key = Self::cache_key(&input.model_path, &device)?;
+        let state_slot = self.state_for_model(&context, &cache_key)?;
+        let mut state = state_slot
+            .lock()
+            .map_err(|_| "whisper state lock poisoned".to_string())?;
 
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         params.set_translate(false);
@@ -170,6 +175,57 @@ impl TranscriptionEngine {
             .map_err(|err| format!("failed to load model: {err}"))
     }
 
+    fn cache_key(model_path: &Path, device: &ResolvedDevice) -> Result<String, String> {
+        let model_key = model_path
+            .to_str()
+            .ok_or_else(|| "model path is not valid UTF-8".to_string())?;
+        Ok(format!("{model_key}#{}", device.id))
+    }
+
+    /// Reuse a single whisper state per model+device instead of allocating one per
+    /// transcription.
+    ///
+    /// `create_state` allocates the KV caches and compute buffers — roughly 409 MB
+    /// for large-v3-turbo — which measured at ~240 ms on every dictation, about
+    /// six times the cost of the decode it was preparing for. whisper.cpp is
+    /// designed to be driven the other way round: allocate the state once, then
+    /// call `whisper_full_with_state` repeatedly, exactly as its own streaming
+    /// example does.
+    ///
+    /// Reusing the state cannot leak one dictation's text into the next: every run
+    /// sets `no_context(true)`, and `whisper_full_with_state` clears
+    /// `state->prompt_past` up front whenever that flag is set.
+    fn state_for_model(
+        &self,
+        context: &Arc<WhisperContext>,
+        key: &str,
+    ) -> Result<Arc<Mutex<WhisperState>>, String> {
+        if let Some(existing) = self
+            .state_cache
+            .lock()
+            .map_err(|_| "state cache lock poisoned".to_string())?
+            .get(key)
+            .cloned()
+        {
+            return Ok(existing);
+        }
+
+        let state = context
+            .create_state()
+            .map_err(|err| format!("failed to create whisper state: {err}"))?;
+        let state = Arc::new(Mutex::new(state));
+
+        let mut cache = self
+            .state_cache
+            .lock()
+            .map_err(|_| "state cache lock poisoned".to_string())?;
+
+        Ok(cache
+            .entry(key.to_string())
+            .or_insert_with(|| state.clone())
+            .clone())
+    }
+
     fn context_for_model(
         &self,
         model_path: &Path,
@@ -179,7 +235,7 @@ impl TranscriptionEngine {
             .to_str()
             .ok_or_else(|| "model path is not valid UTF-8".to_string())?
             .to_string();
-        let key = format!("{model_key}#{}", device.id);
+        let key = Self::cache_key(model_path, device)?;
 
         if let Some(existing) = self
             .context_cache
@@ -429,7 +485,9 @@ fn list_gpu_devices() -> Result<Vec<ComputeDevice>, String> {
 #[cfg(feature = "gpu")]
 fn describe_gpu_device(device: whisper_rs::whisper_rs_sys::ggml_backend_dev_t) -> String {
     let description = unsafe {
-        c_string(whisper_rs::whisper_rs_sys::ggml_backend_dev_description(device))
+        c_string(whisper_rs::whisper_rs_sys::ggml_backend_dev_description(
+            device,
+        ))
     };
     let name = unsafe { c_string(whisper_rs::whisper_rs_sys::ggml_backend_dev_name(device)) };
     let backend = unsafe {

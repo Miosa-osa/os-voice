@@ -11,6 +11,7 @@ mod draw;
 mod gfx;
 mod input;
 mod state;
+mod wave_canvas;
 
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -23,3 +24,6 @@ pub fn start(out_sender: Sender<OutMessage>, in_receiver: Receiver<InMessage>) {
     ipc::set_out_sender(out_sender);
     app::run_embedded(in_receiver);
 }
+
+#[cfg(feature = "render-preview")]
+pub mod preview;

@@ -13,7 +13,9 @@ fn has_flash_action_at(state: &PillState, x: f64, y: f64) -> bool {
     // since the flash can be wider than the draw area (it extends into the
     // content-offset margins). The FlashAction region has exact coordinates.
     let regions = state.click_regions.borrow();
-    regions.iter().any(|r| matches!(r.action, ClickAction::FlashAction) && r.contains(x, y))
+    regions
+        .iter()
+        .any(|r| matches!(r.action, ClickAction::FlashAction) && r.contains(x, y))
 }
 
 pub(crate) fn handle_click(state: &PillState, x: f64, y: f64) {
@@ -34,17 +36,23 @@ pub(crate) fn handle_click(state: &PillState, x: f64, y: f64) {
                     }
                 }
                 ClickAction::StyleForward => {
-                    ipc::send(&OutMessage::StyleSwitch { direction: "forward".to_string() });
+                    ipc::send(&OutMessage::StyleSwitch {
+                        direction: "forward".to_string(),
+                    });
                 }
                 ClickAction::StyleBackward => {
-                    ipc::send(&OutMessage::StyleSwitch { direction: "backward".to_string() });
+                    ipc::send(&OutMessage::StyleSwitch {
+                        direction: "backward".to_string(),
+                    });
                 }
                 ClickAction::AssistantClose => {
                     ipc::send(&OutMessage::AssistantClose);
                 }
                 ClickAction::OpenInNew => {
                     if let Some(ref id) = *state.assistant_conversation_id.borrow() {
-                        ipc::send(&OutMessage::OpenConversation { conversation_id: id.clone() });
+                        ipc::send(&OutMessage::OpenConversation {
+                            conversation_id: id.clone(),
+                        });
                     }
                     ipc::send(&OutMessage::AssistantClose);
                 }
@@ -56,17 +64,23 @@ pub(crate) fn handle_click(state: &PillState, x: f64, y: f64) {
                 }
                 ClickAction::PermissionAllow(id) => {
                     ipc::send(&OutMessage::ResolvePermission {
-                        permission_id: id.clone(), status: "allowed".to_string(), always_allow: false,
+                        permission_id: id.clone(),
+                        status: "allowed".to_string(),
+                        always_allow: false,
                     });
                 }
                 ClickAction::PermissionDeny(id) => {
                     ipc::send(&OutMessage::ResolvePermission {
-                        permission_id: id.clone(), status: "denied".to_string(), always_allow: false,
+                        permission_id: id.clone(),
+                        status: "denied".to_string(),
+                        always_allow: false,
                     });
                 }
                 ClickAction::PermissionAlwaysAllow(id) => {
                     ipc::send(&OutMessage::ResolvePermission {
-                        permission_id: id.clone(), status: "allowed".to_string(), always_allow: true,
+                        permission_id: id.clone(),
+                        status: "allowed".to_string(),
+                        always_allow: true,
                     });
                 }
                 ClickAction::SendButton => {
@@ -78,7 +92,9 @@ pub(crate) fn handle_click(state: &PillState, x: f64, y: f64) {
                 }
                 ClickAction::FlashAction => {
                     if let Some(ref action) = *state.flash_action.borrow() {
-                        ipc::send(&OutMessage::ToastAction { action: action.clone() });
+                        ipc::send(&OutMessage::ToastAction {
+                            action: action.clone(),
+                        });
                     }
                     state.flash_visible.set(false);
                     state.flash_timer.set(0.0);
@@ -128,8 +144,10 @@ pub(crate) fn is_in_hover_zone(state: &PillState, x: f64, y: f64) -> bool {
     };
 
     let (pill_x, pill_y, pill_w, pill_h) = pill_position(state, dw, dh);
-    if x >= pill_x - pad_x && x <= pill_x + pill_w + pad_x
-        && y >= pill_y - pad_y && y <= pill_y + pill_h + pad_y
+    if x >= pill_x - pad_x
+        && x <= pill_x + pill_w + pad_x
+        && y >= pill_y - pad_y
+        && y <= pill_y + pill_h + pad_y
     {
         return true;
     }
@@ -140,8 +158,10 @@ pub(crate) fn is_in_hover_zone(state: &PillState, x: f64, y: f64) -> bool {
             let tooltip_x = (dw - tooltip_w) / 2.0;
             let pill_area_top = dh - PILL_AREA_HEIGHT;
             let tooltip_y = pill_area_top - TOOLTIP_GAP - TOOLTIP_HEIGHT;
-            if x >= tooltip_x && x <= tooltip_x + tooltip_w
-                && y >= tooltip_y && y <= tooltip_y + TOOLTIP_HEIGHT
+            if x >= tooltip_x
+                && x <= tooltip_x + tooltip_w
+                && y >= tooltip_y
+                && y <= tooltip_y + TOOLTIP_HEIGHT
             {
                 return true;
             }
@@ -150,8 +170,10 @@ pub(crate) fn is_in_hover_zone(state: &PillState, x: f64, y: f64) -> bool {
         if state.phase.get() != Phase::Idle {
             let cancel_x = pill_x + pill_w - CANCEL_BUTTON_SIZE / 2.0 + 2.0;
             let cancel_y = pill_y - CANCEL_BUTTON_SIZE / 2.0 - 2.0;
-            if x >= cancel_x && x <= cancel_x + CANCEL_BUTTON_SIZE
-                && y >= cancel_y && y <= cancel_y + CANCEL_BUTTON_SIZE
+            if x >= cancel_x
+                && x <= cancel_x + CANCEL_BUTTON_SIZE
+                && y >= cancel_y
+                && y <= cancel_y + CANCEL_BUTTON_SIZE
             {
                 return true;
             }
@@ -189,8 +211,10 @@ pub(crate) fn is_interactive_at(state: &PillState, x: f64, y: f64) -> bool {
         let tooltip_w = state.tooltip_width.get();
         let tooltip_x = (dw - tooltip_w) / 2.0;
         let tooltip_y = pill_area_top - TOOLTIP_GAP - TOOLTIP_HEIGHT;
-        if x >= tooltip_x && x <= tooltip_x + tooltip_w
-            && y >= tooltip_y && y <= tooltip_y + TOOLTIP_HEIGHT
+        if x >= tooltip_x
+            && x <= tooltip_x + tooltip_w
+            && y >= tooltip_y
+            && y <= tooltip_y + TOOLTIP_HEIGHT
         {
             return true;
         }
@@ -201,8 +225,10 @@ pub(crate) fn is_interactive_at(state: &PillState, x: f64, y: f64) -> bool {
         let (pill_x, pill_y, pw, _) = pill_position(state, dw, dh);
         let cancel_x = pill_x + pw - CANCEL_BUTTON_SIZE / 2.0 + 2.0;
         let cancel_y = pill_y - CANCEL_BUTTON_SIZE / 2.0 - 2.0;
-        if x >= cancel_x && x <= cancel_x + CANCEL_BUTTON_SIZE
-            && y >= cancel_y && y <= cancel_y + CANCEL_BUTTON_SIZE
+        if x >= cancel_x
+            && x <= cancel_x + CANCEL_BUTTON_SIZE
+            && y >= cancel_y
+            && y <= cancel_y + CANCEL_BUTTON_SIZE
         {
             return true;
         }

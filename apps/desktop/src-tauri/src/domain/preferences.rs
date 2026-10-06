@@ -82,6 +82,8 @@ pub struct UserPreferences {
     pub insertion_method: Option<String>,
     #[serde(default)]
     pub typing_speed_ms: Option<i64>,
+    #[serde(default)]
+    pub pill_theme: Option<String>,
 }
 
 fn default_dictation_pill_visibility() -> String {

@@ -67,11 +67,27 @@ pub struct PillPermission {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InMessage {
-    Phase { phase: Phase },
-    Levels { levels: Vec<f32> },
-    StyleInfo { count: u32, name: String },
-    Visibility { visibility: Visibility },
-    WindowSize { size: String },
+    Phase {
+        phase: Phase,
+    },
+    Theme {
+        theme: rust_pill_style::ThemeInput,
+        #[serde(default)]
+        preview: bool,
+    },
+    Levels {
+        levels: Vec<f32>,
+    },
+    StyleInfo {
+        count: u32,
+        name: String,
+    },
+    Visibility {
+        visibility: Visibility,
+    },
+    WindowSize {
+        size: String,
+    },
     Toast {
         message: String,
         toast_type: Option<String>,
@@ -80,10 +96,17 @@ pub enum InMessage {
         action_label: Option<String>,
     },
     DismissToast,
-    Fireworks { message: String },
-    Flame { message: String },
+    Fireworks {
+        message: String,
+    },
+    Flame {
+        message: String,
+    },
     FlashBlue,
-    BroadcastTranscript { text: String },
+    Completed,
+    BroadcastTranscript {
+        text: String,
+    },
     AssistantState {
         active: bool,
         input_mode: String,
@@ -101,21 +124,31 @@ pub enum InMessage {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutMessage {
     Ready,
-    Hover { hovered: bool },
+    Hover {
+        hovered: bool,
+    },
     Click,
-    StyleSwitch { direction: String },
+    StyleSwitch {
+        direction: String,
+    },
     AgentTalk,
     AssistantClose,
     EnableTypeMode,
-    TypedMessage { text: String },
-    OpenConversation { conversation_id: String },
+    TypedMessage {
+        text: String,
+    },
+    OpenConversation {
+        conversation_id: String,
+    },
     ResolvePermission {
         permission_id: String,
         status: String,
         always_allow: bool,
     },
     CancelDictation,
-    ToastAction { action: String },
+    ToastAction {
+        action: String,
+    },
 }
 
 pub fn send(msg: &OutMessage) {
@@ -155,4 +188,21 @@ pub fn start_stdin_reader(sender: Sender<InMessage>) {
         }
         let _ = sender.send(InMessage::Quit);
     });
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::*;
+    #[test]
+    fn accepts_frontend_theme_and_preview() {
+        let message:InMessage=serde_json::from_str(r##"{"type":"theme","theme":{"waveStyle":"liquid","accentColor":"#5eead4","accentColor2":null,"borderColor":null,"scale":1.5},"preview":true}"##).unwrap();
+        match message {
+            InMessage::Theme { theme, preview } => {
+                assert!(preview);
+                assert_eq!(theme.theme().wave_style, rust_pill_style::WaveStyle::Liquid);
+                assert_eq!(theme.theme().scale, 1.5);
+            }
+            _ => panic!("wrong message"),
+        }
+    }
 }

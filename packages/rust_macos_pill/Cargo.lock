@@ -170,8 +170,16 @@ version = "0.1.0"
 dependencies = [
  "cocoa",
  "objc",
+ "rust_pill_style",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "rust_pill_style"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

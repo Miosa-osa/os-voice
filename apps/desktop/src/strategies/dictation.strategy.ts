@@ -34,6 +34,7 @@ import { BaseStrategy } from "./base.strategy";
 
 export class DictationStrategy extends BaseStrategy {
   private streamedSegmentCount = 0;
+  private streamedOutputFailed = false;
   private streamedProcessedText = "";
   private pasteQueue: Promise<void> = Promise.resolve();
   private currentAppId: string | null = null;
@@ -84,6 +85,7 @@ export class DictationStrategy extends BaseStrategy {
           currentAppId: this.currentAppId,
         });
       } catch (error) {
+        this.streamedOutputFailed = true;
         getLogger().error(`Failed to paste interim segment: ${error}`);
       }
     });
@@ -141,12 +143,20 @@ export class DictationStrategy extends BaseStrategy {
     await invoke<void>("set_phase", { phase });
   }
 
+  private notifyCompletion(): void {
+    void invoke("notify_pill_completion").catch((error) =>
+      getLogger().warning(`Completion animation failed: ${error}`),
+    );
+  }
+
   private async handleFinalStreamedTranscript(
     args: HandleTranscriptParams,
   ): Promise<HandleTranscriptResult> {
     const sanitizedTranscript = this.sanitizeTranscript(args.rawTranscript);
 
     await this.pasteQueue;
+    if (this.streamedSegmentCount > 0 && !this.streamedOutputFailed)
+      this.notifyCompletion();
 
     const transcript = this.streamedProcessedText || sanitizedTranscript;
     getLogger().verbose(
@@ -213,6 +223,7 @@ export class DictationStrategy extends BaseStrategy {
           }
 
           getLogger().info("Transcript output routed successfully");
+          this.notifyCompletion();
 
           try {
             const finalTranscript = transcript;

@@ -1,4 +1,4 @@
-import { fetch } from "@tauri-apps/plugin-http";
+import { invoke } from "@tauri-apps/api/core";
 
 export type Deferred<T> = {
   promise: Promise<T>;
@@ -41,19 +41,24 @@ export const fetchWithTimeout = async (
   init: RequestInit | undefined,
   timeoutMs: number,
 ): Promise<Response> => {
-  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutHandle = setTimeout(() => {
-      reject(new Error(`Request timed out: ${url}`));
-    }, timeoutMs);
-  });
-
-  try {
-    return await Promise.race([fetch(url, init), timeoutPromise]);
-  } finally {
-    if (timeoutHandle) {
-      clearTimeout(timeoutHandle);
-    }
-  }
+  const bytes =
+    init?.body == null
+      ? undefined
+      : new Uint8Array(await new Response(init.body).arrayBuffer());
+  const response = await invoke<{ status: number; body: string }>(
+    "local_sidecar_request",
+    {
+      url,
+      method: init?.method ?? "GET",
+      contentType: new Headers(init?.headers).get("content-type") ?? undefined,
+      body: bytes ? Array.from(bytes) : undefined,
+      timeoutMs,
+    },
+  );
+  return new Response(
+    [204, 205, 304].includes(response.status) ? null : response.body,
+    {
+      status: response.status,
+    },
+  );
 };

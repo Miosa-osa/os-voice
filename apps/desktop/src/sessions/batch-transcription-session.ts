@@ -19,9 +19,7 @@ export class BatchTranscriptionSession implements TranscriptionSession {
   async finalize(
     audio: StopRecordingResponse,
   ): Promise<TranscriptionSessionResult> {
-    const payloadSamples = Array.isArray(audio.samples)
-      ? audio.samples
-      : Array.from(audio.samples ?? []);
+    const payloadSamples = audio.samples;
     const rate = audio.sampleRate;
 
     if (rate == null || rate <= 0 || payloadSamples.length === 0) {

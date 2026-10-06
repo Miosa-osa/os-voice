@@ -25,7 +25,10 @@ pub fn reap_orphan_transcription_sidecars() -> usize {
             .and_then(|path| path.file_name())
             .map(|name| name.to_string_lossy().starts_with("rust-transcription"))
             .unwrap_or(false)
-            || process.name().to_string_lossy().starts_with("rust-transcript");
+            || process
+                .name()
+                .to_string_lossy()
+                .starts_with("rust-transcript");
 
         // Only reap sidecars that are actually ORPHANED — parent gone, or
         // reparented to an OS reaper (pid<=1 / init / systemd / launchd).
